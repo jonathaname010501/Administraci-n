@@ -1,0 +1,20 @@
+# ── Datos reales: NUNCA a GitHub ──────────────────────────────────────
+# La base migrada (nombres, asuntos, observaciones de los oficios) y las
+# capturas de pantalla con datos. Se quedan en tu computadora y en Google.
+base/
+capturas/
+*.xlsx
+*.csv
+
+# ── Credenciales y configuración local ────────────────────────────────
+.clasp.json
+.clasprc.json
+.env
+.env.*
+.vercel
+
+# ── Generados ─────────────────────────────────────────────────────────
+dist/
+node_modules/
+pruebas/fuentes/
+__pycache__/

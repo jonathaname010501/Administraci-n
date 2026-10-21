@@ -1,0 +1,1204 @@
+<script>
+/* ════════════════════════════════════════════════════════════════════
+   Control de Gestión · Aplicación (navegador)
+
+   · Todo pasa por llamar(accion, datos) → google.script.run.api(token,…)
+   · Nada de innerHTML con datos: la interfaz se arma con h(), que crea
+     nodos y pone el texto como texto. Así un asunto con "<script>" se ve
+     tal cual y no se ejecuta.
+   · El token de sesión vive en sessionStorage (se borra al cerrar la
+     pestaña) y la sesión expira sola en el servidor tras 3 h sin uso.
+   ════════════════════════════════════════════════════════════════════ */
+(function () {
+  'use strict';
+
+  /* ───────────────────────── Utilidades ───────────────────────── */
+  var ICONOS = {
+    mas: '<path d="M12 5v14M5 12h14"/>',
+    buscar: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>',
+    excel: '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13l4 5M13 13l-4 5"/>',
+    archivo: '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/>',
+    clip: '<path d="m21 11-8.5 8.5a5 5 0 0 1-7-7L14 4a3.5 3.5 0 0 1 5 5l-8.5 8.5a2 2 0 0 1-3-3L15 7"/>',
+    cerrar: '<path d="M18 6 6 18M6 6l12 12"/>',
+    editar: '<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m14 6 4 4"/>',
+    responder: '<path d="M10 9V5l-7 7 7 7v-4.1c5 0 8.5 1.6 11 5.1-1-5-4-10-11-11z"/>',
+    cancelar: '<circle cx="12" cy="12" r="9"/><path d="m5.6 5.6 12.8 12.8"/>',
+    check: '<path d="M20 6 9 17l-5-5"/>',
+    reloj: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+    lista: '<path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>',
+    libro: '<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20V3H6.5A2.5 2.5 0 0 0 4 5.5z"/><path d="M4 19.5A2.5 2.5 0 0 0 6.5 22H20v-5"/>',
+    usuarios: '<path d="M17 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9.5" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.9M16 3.1a4 4 0 0 1 0 7.8"/>',
+    historia: '<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5M12 7v5l4 2"/>',
+    engrane: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
+    salir: '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/>',
+    llave: '<circle cx="7.5" cy="15.5" r="4.5"/><path d="m10.7 12.3 9.8-9.8M17 6l3 3M14.5 8.5l2 2"/>',
+    subir: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/>',
+    bajar: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/>',
+    ojo: '<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8S1 12 1 12z"/><circle cx="12" cy="12" r="3"/>',
+    ojoNo: '<path d="M17.9 17.9A10.1 10.1 0 0 1 12 20C5 20 1 12 1 12a18.5 18.5 0 0 1 5.1-5.9M9.9 4.2A9.1 9.1 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.2 3.2M1 1l22 22"/>',
+    unir: '<path d="M8 3v6a4 4 0 0 0 4 4h0a4 4 0 0 1 4 4v4M16 3v6a4 4 0 0 1-4 4"/>',
+    copiar: '<rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
+    papelera: '<path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>'
+  };
+
+  function icono(n) {
+    var s = document.createElement('span');
+    s.style.display = 'inline-flex';
+    s.setAttribute('aria-hidden', 'true');
+    // Solo trazos fijos de este archivo: nunca datos del usuario.
+    s.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' + (ICONOS[n] || '') + '</svg>';
+    return s;
+  }
+
+  function h(tag, props) {
+    var el = document.createElement(tag);
+    if (props) Object.keys(props).forEach(function (k) {
+      var v = props[k];
+      if (v === null || v === undefined || v === false) return;
+      if (k === 'class') el.className = v;
+      else if (k === 'style' && typeof v === 'object') Object.keys(v).forEach(function (p) {
+        if (p.slice(0, 2) === '--') el.style.setProperty(p, v[p]); else el.style[p] = v[p];
+      });
+      else if (k.slice(0, 2) === 'on' && typeof v === 'function') el.addEventListener(k.slice(2).toLowerCase(), v);
+      else if (k === 'value' || k === 'checked' || k === 'disabled' || k === 'selected' || k === 'hidden' || k === 'readOnly') el[k] = v;
+      else el.setAttribute(k, v === true ? '' : String(v));
+    });
+    for (var i = 2; i < arguments.length; i++) agregar(el, arguments[i]);
+    return el;
+  }
+  function agregar(el, c) {
+    if (c === null || c === undefined || c === false) return;
+    if (Array.isArray(c)) { c.forEach(function (x) { agregar(el, x); }); return; }
+    el.appendChild(c instanceof Node ? c : document.createTextNode(String(c)));
+  }
+  function vaciar(el) { while (el.firstChild) el.removeChild(el.firstChild); return el; }
+
+  function norm(s) {
+    return String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
+  }
+  function pad3(n) { var s = String(n); return s.length >= 3 ? s : ('00' + s).slice(-3); }
+  function etiquetaNum(r) { return pad3(r.consecutivo) + (r.sufijo ? ' ' + r.sufijo : '') + '/' + r.anio; }
+  function fechaCorta(iso) { if (!iso) return ''; var p = String(iso).slice(0, 10).split('-'); return p.length === 3 ? p[2] + '/' + p[1] + '/' + p[0] : iso; }
+  function hoyIso() { var d = new Date(); return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2); }
+  function sumarHabiles(iso, n) {
+    var p = iso.split('-').map(Number), d = new Date(p[0], p[1] - 1, p[2]), k = 0;
+    while (k < n) { d.setDate(d.getDate() + 1); if (d.getDay() !== 0 && d.getDay() !== 6) k++; }
+    return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2);
+  }
+  function diasHasta(iso) {
+    var p = iso.split('-').map(Number), hoy = new Date(); hoy.setHours(0, 0, 0, 0);
+    return Math.round((new Date(p[0], p[1] - 1, p[2]) - hoy) / 86400000);
+  }
+  function lineas(s) { var p = String(s || '').split('\n'); return { primera: p[0], resto: p.slice(1).join(' ') }; }
+  function guardarLocal(k, v) { try { if (v === null) sessionStorage.removeItem(k); else sessionStorage.setItem(k, v); } catch (e) { /* sin almacenamiento */ } }
+  function leerLocal(k) { try { return sessionStorage.getItem(k); } catch (e) { return null; } }
+
+  /* ───────────────────────── Estado ───────────────────────── */
+  var E = {
+    token: leerLocal('cg_token'), ini: null, publico: null, vista: 'registros', tipo: null, anio: null,
+    lista: [], filtros: { q: '', estatus: '', acuse: '' }, mostrar: 60, directorio: []
+  };
+  var app = document.getElementById('app');
+
+  function tipoDef(t) { return E.ini.todosTipos[t]; }
+  function tieneCampo(t, c) { return tipoDef(t).campos.some(function (x) { return x[0] === c; }); }
+  function etiquetaCampo(t, c, def) { var x = tipoDef(t).campos.filter(function (y) { return y[0] === c; })[0]; return x ? x[1] : def; }
+  function puedeCapturar(t) { return E.ini && E.ini.yo.rol !== 'consulta' && (!t || E.ini.orden.indexOf(t) >= 0); }
+  function esAdmin() { return E.ini && E.ini.yo.rol === 'admin'; }
+
+  /* ───────────────────────── Servidor ───────────────────────── */
+  var enVuelo = 0;
+  function progreso(d) {
+    enVuelo += d;
+    var b = document.getElementById('progreso');
+    if (enVuelo > 0) b.classList.add('activo'); else b.classList.remove('activo');
+  }
+  /**
+   * Dos caminos al mismo servidor:
+   *  · Dentro de Google (la URL /exec): google.script.run.api(…)
+   *  · Publicada fuera (Vercel): fetch POST a la URL /exec configurada en
+   *    config.js (window.CG_API). Se manda como text/plain para que el
+   *    navegador no haga la consulta previa (Apps Script no la contesta).
+   */
+  function transporte(accion, datos) {
+    var cuerpo = { token: E.token, accion: accion, datos: datos || {} };
+    if (window.google && google.script && google.script.run) {
+      return new Promise(function (ok, mal) {
+        google.script.run.withSuccessHandler(ok).withFailureHandler(mal).api(cuerpo.token, cuerpo.accion, cuerpo.datos);
+      });
+    }
+    if (!window.CG_API) return Promise.reject(new Error('Falta configurar la dirección del servidor (CG_API_URL).'));
+    return fetch(window.CG_API, { method: 'POST', redirect: 'follow', credentials: 'omit', cache: 'no-store',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(cuerpo) })
+      .then(function (r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+      });
+  }
+
+  function llamar(accion, datos) {
+    progreso(1);
+    return transporte(accion, datos).then(function (r) {
+      progreso(-1);
+      if (r && r.ok) return r.datos;
+      var e = new Error(r && r.error ? r.error : 'Respuesta inesperada del servidor.');
+      e.codigo = r && r.codigo; e.extra = r && r.extra;
+      if (e.codigo === 'SESION') { terminarSesion(e.message); }
+      else if (e.codigo === 'CAMBIAR_CLAVE') { pantallaCambiarClave(true); }
+      throw e;
+    }, function () {
+      progreso(-1);
+      var e = new Error('No hubo conexión con el servidor. Revisa tu internet e intenta de nuevo.');
+      e.codigo = 'RED';
+      throw e;
+    });
+  }
+  function fallo(e) { if (e && e.codigo !== 'SESION' && e.codigo !== 'CAMBIAR_CLAVE') aviso(e.message || String(e), 'error'); }
+
+  /* ───────────────────────── Avisos y ventanas ───────────────────────── */
+  function aviso(texto, tipo, extra) {
+    var cont = document.getElementById('avisos');
+    var el = h('div', { class: 'aviso aviso--' + (tipo || 'info') }, h('div', null, texto, extra ? h('div', { style: { marginTop: '6px' } }, extra) : null),
+      h('button', { 'aria-label': 'Cerrar aviso', onclick: function () { el.remove(); } }, '✕'));
+    cont.appendChild(el);
+    setTimeout(function () { if (el.parentNode) el.remove(); }, tipo === 'error' ? 9000 : extra ? 12000 : 4500);
+  }
+
+  var pila = [];
+  function ventana(o) {
+    var velo = h('div', { class: 'velo velo--modal' });
+    var cuerpo = h('div', { class: 'modal__cuerpo' }, o.cuerpo);
+    var pie = h('div', { class: 'modal__pie' }, o.pie || null);
+    var caja = h('div', { class: 'modal', role: 'dialog', 'aria-modal': 'true', 'aria-label': o.titulo, style: { '--ancho': (o.ancho || 720) + 'px' } },
+      h('div', { class: 'modal__cab' }, h('h2', null, o.titulo), h('button', { class: 'icono-btn', 'aria-label': 'Cerrar', onclick: function () { intentarCerrar(); } }, icono('cerrar'))),
+      cuerpo, o.pie ? pie : null);
+    var v = { caja: caja, cuerpo: cuerpo, pie: pie, cerrar: cerrar, alCerrar: o.alCerrar, antesDeCerrar: o.antesDeCerrar };
+    function cerrar() {
+      velo.remove(); caja.remove();
+      pila = pila.filter(function (x) { return x !== v; });
+      document.removeEventListener('keydown', tecla);
+      if (v.alCerrar) v.alCerrar();
+    }
+    function intentarCerrar() {
+      if (v.antesDeCerrar) Promise.resolve(v.antesDeCerrar()).then(function (s) { if (s !== false) cerrar(); });
+      else cerrar();
+    }
+    v.intentarCerrar = intentarCerrar;
+    function tecla(ev) { if (ev.key === 'Escape' && pila[pila.length - 1] === v) intentarCerrar(); }
+    velo.addEventListener('click', intentarCerrar);
+    document.addEventListener('keydown', tecla);
+    document.body.appendChild(velo);
+    document.body.appendChild(caja);
+    pila.push(v);
+    var primero = caja.querySelector('input:not([type=hidden]):not([type=file]):not([readonly]), textarea, select');
+    if (primero && !o.sinFoco) primero.focus();
+    return v;
+  }
+
+  function confirmar(texto, o) {
+    o = o || {};
+    return new Promise(function (res) {
+      var listo = false;
+      var v = ventana({ titulo: o.titulo || 'Confirmar', ancho: 460, sinFoco: true, cuerpo: h('div', { style: { whiteSpace: 'pre-wrap' } }, texto),
+        alCerrar: function () { if (!listo) res(false); },
+        pie: [h('button', { class: 'btn', onclick: function () { v.cerrar(); } }, o.no || 'Cancelar'),
+          h('button', { class: 'btn ' + (o.peligro ? 'btn--peligro-lleno' : 'btn--prim'), onclick: function () { listo = true; v.cerrar(); res(true); } }, o.si || 'Aceptar')] });
+    });
+  }
+
+  function campo(etiqueta, control, o) {
+    o = o || {};
+    var objetivo = /^(INPUT|SELECT|TEXTAREA)$/.test(control.tagName) ? control : control.querySelector && control.querySelector('input, select, textarea');
+    var id = null;
+    if (objetivo) { if (!objetivo.id) objetivo.id = 'c' + Math.random().toString(36).slice(2, 9); id = objetivo.id; }
+    return h('div', { class: 'campo' + (o.ancho ? ' ancho' : '') },
+      h('label', { for: id }, etiqueta, o.req ? h('span', { style: { color: 'var(--guinda)' } }, ' *') : null),
+      control, o.ayuda ? h('div', { class: 'campo__ayuda' }, o.ayuda) : null);
+  }
+
+  function insEstatus(est) {
+    return h('span', { class: 'ins ins--' + String(est || 'sin').replace(/\s+/g, '-') }, est || 'Sin estatus');
+  }
+  function insVence(r) {
+    if (!r.fecha_limite || ['Atendido', 'Concluido', 'Cancelado'].indexOf(r.estatus) >= 0) return null;
+    var d = diasHasta(r.fecha_limite);
+    if (d < 0) return h('span', { class: 'ins ins--vencido' }, 'Vencido hace ' + (-d) + ' d');
+    if (d === 0) return h('span', { class: 'ins ins--hoy' }, 'Vence hoy');
+    if (d <= 3) return h('span', { class: 'ins ins--pronto' }, 'Vence en ' + d + ' d');
+    return h('span', { class: 'ins' }, 'Límite ' + fechaCorta(r.fecha_limite));
+  }
+
+  function descargarBytes(bytes, nombre, mime) {
+    // Sin acentos ni símbolos: algunos navegadores ignoran el nombre si los trae
+    nombre = String(nombre || 'archivo').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^\w .()-]+/g, '_');
+    var url = URL.createObjectURL(new Blob([bytes], { type: mime }));
+    var a = h('a', { href: url, download: nombre, style: { display: 'none' } });
+    document.body.appendChild(a);
+    try { a.click(); } catch (e) { /* algunos navegadores lo bloquean */ }
+    a.remove();
+    aviso('Listo: ' + nombre, 'ok', h('a', { href: url, download: nombre, style: { color: '#fff', fontWeight: 500 } }, 'Si no se descargó, haz clic aquí'));
+    setTimeout(function () { URL.revokeObjectURL(url); }, 120000);
+  }
+
+  function b64aBytes(b64) {
+    var bin = atob(b64), out = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+    return out;
+  }
+
+  /* ───────────────────────── Entrar ───────────────────────── */
+  function encabezadoInst() {
+    var enc = (E.ini && E.ini.config.encabezados) || (E.publico && E.publico.encabezados) || [];
+    return enc;
+  }
+
+  function pantallaEntrar(mensaje) {
+    document.title = 'Control de Gestión';
+    var usuario = h('input', { class: 'entrada', autocomplete: 'username', autocapitalize: 'none', spellcheck: 'false', required: true, maxlength: 30 });
+    var clave = h('input', { class: 'entrada', type: 'password', autocomplete: 'current-password', required: true, maxlength: 128 });
+    var ver = h('button', { type: 'button', class: 'icono-btn', 'aria-label': 'Mostrar contraseña', onclick: function () {
+      clave.type = clave.type === 'password' ? 'text' : 'password'; vaciar(ver).appendChild(icono(clave.type === 'password' ? 'ojo' : 'ojoNo'));
+    } }, icono('ojo'));
+    var msg = h('div', null, mensaje ? h('div', { class: 'alerta alerta--info' }, mensaje) : null);
+    var boton = h('button', { class: 'btn btn--prim', type: 'submit', style: { width: '100%', minHeight: '42px' } }, 'Entrar');
+    var form = h('form', { class: 'login__cuerpo', onsubmit: function (ev) {
+      ev.preventDefault();
+      boton.disabled = true; boton.textContent = 'Entrando…';
+      llamar('entrar', { usuario: usuario.value, clave: clave.value }).then(function (r) {
+        E.token = r.token; guardarLocal('cg_token', r.token);
+        E.usuarioEntrada = usuario.value.trim().toLowerCase();
+        if (r.debe_cambiar) pantallaCambiarClave(true, clave.value);
+        else cargarInicio();
+      }).catch(function (e) {
+        vaciar(msg).appendChild(h('div', { class: 'alerta alerta--error' }, e.message));
+        boton.disabled = false; boton.textContent = 'Entrar';
+        clave.value = ''; clave.focus();
+      });
+    } }, msg, campo('Usuario', usuario), campo('Contraseña', h('div', { class: 'clave-envoltura' }, clave, ver)), boton);
+    vaciar(app).appendChild(h('div', { class: 'login' },
+      h('div', { class: 'login__caja' },
+        h('div', { class: 'login__cab' }, h('div', { class: 'login__dep' }, encabezadoInst().map(function (l) { return h('div', null, l); })),
+          h('div', { class: 'login__titulo' }, 'Control de Gestión')),
+        form,
+        h('div', { class: 'login__pie' }, 'Si olvidaste tu contraseña, pide a un administrador que la restablezca.'))));
+    setTimeout(function () { usuario.focus(); }, 50);
+  }
+
+  function reglasClave(valor, usuario) {
+    return [
+      [valor.length >= 8, 'Al menos 8 caracteres'],
+      [/[A-Za-zÁÉÍÓÚáéíóúÑñ]/.test(valor) && /\d/.test(valor), 'Letras y números'],
+      [!usuario || valor.toLowerCase().indexOf(usuario.toLowerCase()) < 0, 'Que no contenga tu usuario']
+    ];
+  }
+
+  function formularioClave(alTerminar, actualConocida) {
+    var usuario = (E.ini && E.ini.yo.usuario) || E.usuarioEntrada || '';
+    var actual = h('input', { class: 'entrada', type: 'password', autocomplete: 'current-password', value: actualConocida || '' });
+    var nueva = h('input', { class: 'entrada', type: 'password', autocomplete: 'new-password', maxlength: 128 });
+    var repite = h('input', { class: 'entrada', type: 'password', autocomplete: 'new-password', maxlength: 128 });
+    var lista = h('ul', { class: 'reglas' });
+    var msg = h('div');
+    function pintar() {
+      vaciar(lista);
+      reglasClave(nueva.value, usuario).concat([[nueva.value && nueva.value === repite.value, 'Las dos coinciden']]).forEach(function (r) {
+        lista.appendChild(h('li', { class: r[0] ? 'ok' : '' }, r[1]));
+      });
+    }
+    nueva.addEventListener('input', pintar); repite.addEventListener('input', pintar); pintar();
+    var boton = h('button', { class: 'btn btn--prim', type: 'submit' }, 'Guardar contraseña');
+    var form = h('form', { style: { display: 'grid', gap: '12px' }, onsubmit: function (ev) {
+      ev.preventDefault();
+      if (nueva.value !== repite.value) { vaciar(msg).appendChild(h('div', { class: 'alerta alerta--error' }, 'Las contraseñas no coinciden.')); return; }
+      boton.disabled = true;
+      llamar('cambiarClave', { actual: actual.value, nueva: nueva.value }).then(function (r) {
+        E.token = r.token; guardarLocal('cg_token', r.token);
+        aviso('Contraseña actualizada.', 'ok');
+        alTerminar();
+      }).catch(function (e) { boton.disabled = false; vaciar(msg).appendChild(h('div', { class: 'alerta alerta--error' }, e.message)); });
+    } }, msg,
+      actualConocida ? null : campo('Contraseña actual', actual),
+      campo('Contraseña nueva', nueva), campo('Repítela', repite), lista, boton);
+    return form;
+  }
+
+  function pantallaCambiarClave(forzada, temporal) {
+    if (!forzada) {
+      var v = ventana({ titulo: 'Cambiar mi contraseña', ancho: 440, cuerpo: formularioClave(function () { v.cerrar(); }) });
+      return;
+    }
+    vaciar(app).appendChild(h('div', { class: 'login' }, h('div', { class: 'login__caja' },
+      h('div', { class: 'login__cab' }, h('div', { class: 'login__dep' }, 'Primer ingreso'), h('div', { class: 'login__titulo' }, 'Crea tu contraseña')),
+      h('div', { class: 'login__cuerpo' },
+        h('div', { class: 'alerta alerta--info' }, 'Tu contraseña es temporal. Elige una que solo tú conozcas.'),
+        formularioClave(function () { cargarInicio(); }, temporal)),
+      h('div', { class: 'login__pie' }, h('a', { href: '#', onclick: function (ev) { ev.preventDefault(); terminarSesion(); } }, 'Salir')))));
+  }
+
+  function terminarSesion(mensaje) {
+    E.token = null; E.ini = null; guardarLocal('cg_token', null);
+    pila.slice().forEach(function (v) { v.cerrar(); });
+    cerrarPanel();
+    pantallaEntrar(mensaje);
+  }
+
+  /* ───────────────────────── Estructura ───────────────────────── */
+  function cargarInicio() {
+    return llamar('inicio').then(function (ini) {
+      E.ini = ini;
+      E.directorio = ini.directorio;
+      if (!E.tipo || ini.orden.indexOf(E.tipo) < 0) E.tipo = ini.orden[0];
+      E.anio = E.anio || ini.anioActual;
+      montar();
+      irA(E.vista && navBotones[E.vista] ? E.vista : 'registros');
+      llamar('pendientes').then(pintarInsigniaPendientes).catch(function () {});
+    }).catch(function (e) { if (e.codigo !== 'SESION' && e.codigo !== 'CAMBIAR_CLAVE') pantallaEntrar(e.message); });
+  }
+
+  var navBotones = {};
+  var principal = null;
+  function montar() {
+    var yo = E.ini.yo;
+    document.title = 'Control de Gestión';
+    var items = [['registros', 'Registros', 'lista'], ['pendientes', 'Pendientes', 'reloj'], ['directorio', 'Directorio', 'libro']];
+    if (esAdmin()) items.push(['usuarios', 'Usuarios', 'usuarios'], ['bitacora', 'Bitácora', 'historia'], ['config', 'Configuración', 'engrane']);
+    navBotones = {};
+    var nav = h('nav', { class: 'nav', 'aria-label': 'Secciones' }, h('div', { class: 'nav__fila' }, items.map(function (it) {
+      var b = h('button', { class: 'nav__i', onclick: function () { irA(it[0]); } }, icono(it[2]), it[1]);
+      navBotones[it[0]] = b;
+      return b;
+    })));
+    principal = h('main', { class: 'principal', id: 'vista' });
+    vaciar(app).appendChild(h('div', null,
+      h('header', { class: 'barra' }, h('div', { class: 'barra__fila' },
+        h('div', { class: 'barra__marca' }, h('div', { class: 'barra__titulo' }, 'Control de Gestión'), h('div', { class: 'barra__dep' }, (E.ini.config.encabezados || []).slice(1).join(' · '))),
+        h('div', { class: 'barra__esp' }),
+        h('div', { class: 'barra__yo' }, h('strong', null, yo.nombre), h('span', null, yo.rolNombre)),
+        h('button', { class: 'icono-btn', title: 'Cambiar mi contraseña', 'aria-label': 'Cambiar mi contraseña', onclick: function () { pantallaCambiarClave(false); } }, icono('llave')),
+        h('button', { class: 'icono-btn', title: 'Salir', 'aria-label': 'Salir', onclick: function () { llamar('salir').catch(function () {}).then(function () { terminarSesion('Saliste del sistema.'); }); } }, icono('salir')))),
+      nav, principal));
+  }
+
+  function pintarInsigniaPendientes(p) {
+    var b = navBotones.pendientes;
+    if (!b) return;
+    var viejo = b.querySelector('.nav__num'); if (viejo) viejo.remove();
+    var urgentes = p.porAtender.filter(function (r) { return r.fecha_limite && diasHasta(r.fecha_limite) <= 0; }).length;
+    if (urgentes) b.appendChild(h('span', { class: 'nav__num', title: 'Vencidos o vencen hoy' }, urgentes));
+  }
+
+  var vistas = {};
+  function irA(v) {
+    E.vista = v;
+    Object.keys(navBotones).forEach(function (k) { navBotones[k].classList.toggle('activo', k === v); });
+    vaciar(principal);
+    vistas[v]();
+    window.scrollTo(0, 0);
+  }
+
+  /* ───────────────────────── Registros ───────────────────────── */
+  var refsReg = {};
+  vistas.registros = function () {
+    var ini = E.ini;
+    var libretas = h('div', { class: 'libretas', role: 'tablist' }, ini.orden.map(function (t) {
+      return h('button', { class: 'libreta' + (t === E.tipo ? ' activa' : ''), role: 'tab', 'aria-selected': t === E.tipo ? 'true' : 'false', 'data-tipo': t,
+        onclick: function () { if (E.tipo !== t) { E.tipo = t; E.mostrar = 60; vistas.registros(); } } },
+        h('div', { class: 'libreta__n', 'data-n': t }, E.anio === ini.anioActual ? (ini.conteos[t] || 0) : '·'),
+        h('div', { class: 'libreta__t' }, ini.todosTipos[t].nombre));
+    }));
+    var q = h('input', { class: 'entrada', type: 'search', placeholder: 'Buscar por número, asunto, persona, observaciones…', value: E.filtros.q,
+      'aria-label': 'Buscar', oninput: function () { E.filtros.q = q.value; E.mostrar = 60; pintarLista(); } });
+    var anio = h('select', { class: 'entrada', 'aria-label': 'Año', onchange: function () { E.anio = Number(anio.value); vistas.registros(); } },
+      ini.anios.map(function (a) { return h('option', { value: a, selected: a === E.anio }, 'Año ' + a); }));
+    var est = h('select', { class: 'entrada', 'aria-label': 'Estatus', onchange: function () { E.filtros.estatus = est.value; E.mostrar = 60; pintarLista(); } },
+      [['', 'Todos los estatus'], ['(sin)', 'Sin estatus']].concat(ini.estatus.map(function (s) { return [s, s]; })).map(function (o) {
+        return h('option', { value: o[0], selected: o[0] === E.filtros.estatus }, o[1]);
+      }));
+    var acu = h('select', { class: 'entrada', 'aria-label': 'Acuse', onchange: function () { E.filtros.acuse = acu.value; E.mostrar = 60; pintarLista(); } },
+      [['', 'Con y sin acuse'], ['SI', 'Con acuse'], ['NO', 'Sin acuse']].map(function (o) { return h('option', { value: o[0], selected: o[0] === E.filtros.acuse }, o[1]); }));
+    var def = ini.todosTipos[E.tipo];
+    refsReg.res = h('div');
+    vaciar(principal).appendChild(h('div', null,
+      h('div', { class: 'titulo-vista' }, h('h1', null, def.nombre), h('span', { class: 'sub' }, 'Año ' + E.anio), h('div', { class: 'titulo-vista__esp' }),
+        h('button', { class: 'btn', onclick: function () { exportarExcel(false); } }, icono('excel'), 'Excel'),
+        ini.orden.length > 1 ? h('button', { class: 'btn', onclick: function () { exportarExcel(true); }, title: 'Todas tus libretas en un solo archivo, una hoja por libreta' }, icono('excel'), 'Excel de todo') : null,
+        puedeCapturar(E.tipo) ? h('button', { class: 'btn btn--prim', onclick: function () { formulario(E.tipo, null); } }, icono('mas'), 'Nuevo ' + def.singular.toLowerCase()) : null),
+      libretas,
+      h('div', { class: 'herr' }, h('div', { class: 'buscador' }, icono('buscar'), q), anio, est, acu),
+      refsReg.res));
+    vaciar(refsReg.res).appendChild(h('div', { class: 'tarjeta vacio' }, 'Cargando…'));
+    cargarLista();
+  };
+
+  function cargarLista() {
+    var pedido = E.tipo + E.anio;
+    return llamar('listar', { tipo: E.tipo, anio: E.anio }).then(function (lista) {
+      if (pedido !== E.tipo + E.anio) return;
+      lista.forEach(function (r) {
+        r._b = norm([etiquetaNum(r), r.numero, r.asunto, r.dirigido_a, r.firma, r.obs, r.elaboro, r.carpeta, r.turnado_a, r.estatus].join(' '));
+      });
+      E.lista = lista;
+      var n = document.querySelector('.libreta__n[data-n="' + E.tipo + '"]');
+      if (n) n.textContent = lista.length;
+      if (E.anio === E.ini.anioActual) E.ini.conteos[E.tipo] = lista.length;
+      pintarLista();
+    }).catch(function (e) {
+      fallo(e);
+      if (refsReg.res) vaciar(refsReg.res).appendChild(h('div', { class: 'tarjeta vacio' }, h('strong', null, 'No se pudo cargar'), e.message));
+    });
+  }
+
+  function filtrada() {
+    var f = E.filtros, palabras = norm(f.q).split(' ').filter(Boolean);
+    return E.lista.filter(function (r) {
+      if (f.estatus === '(sin)' && r.estatus) return false;
+      if (f.estatus && f.estatus !== '(sin)' && r.estatus !== f.estatus) return false;
+      if (f.acuse && r.acuse !== f.acuse) return false;
+      for (var i = 0; i < palabras.length; i++) if (r._b.indexOf(palabras[i]) < 0) return false;
+      return true;
+    });
+  }
+
+  function columnaPersona(t) { return t === 'OFS' ? ['dirigido_a', 'Dirigido a'] : ['firma', etiquetaCampo(t, 'firma', 'Remitente')]; }
+  function columnaFecha(t) { return tieneCampo(t, 'fecha_recepcion') ? ['fecha_recepcion', 'Recibido'] : ['fecha', 'Fecha']; }
+
+  function pintarLista() {
+    if (!refsReg.res) return;
+    var t = E.tipo, filas = filtrada(), vis = filas.slice(0, E.mostrar);
+    var cp = columnaPersona(t), cf = columnaFecha(t);
+    var numEt = t === 'OFS' ? 'No. de oficio' : etiquetaCampo(t, 'numero', 'Número');
+    vaciar(refsReg.res);
+    refsReg.res.appendChild(h('p', { class: 'conteo' }, filas.length === E.lista.length ? E.lista.length + ' registros' : filas.length + ' de ' + E.lista.length + ' registros'));
+    if (!filas.length) {
+      refsReg.res.appendChild(h('div', { class: 'tarjeta vacio' }, h('strong', null, E.lista.length ? 'Nada coincide con la búsqueda' : 'Todavía no hay registros'),
+        E.lista.length ? 'Prueba con otras palabras o quita filtros.' : (puedeCapturar(t) ? 'Usa «Nuevo» para capturar el primero.' : '')));
+      return;
+    }
+    var tabla = h('table', { class: 'tabla' },
+      h('thead', null, h('tr', null, h('th', null, 'No.'), h('th', null, numEt), h('th', null, 'Asunto'), h('th', null, cp[1]), h('th', null, cf[1]), h('th', null, 'Estatus'), h('th', { 'aria-label': 'Acuse y archivo' }, ''))),
+      h('tbody', null, vis.map(function (r) {
+        var p = lineas(r[cp[0]]);
+        return h('tr', { class: r.estatus === 'Cancelado' ? 'cancelado' : '', tabindex: '0', onclick: function () { abrirDetalle(r.id); },
+          onkeydown: function (ev) { if (ev.key === 'Enter') abrirDetalle(r.id); } },
+          h('td', { class: 't-num' }, etiquetaNum(r)),
+          h('td', { class: 't-folio' }, r.numero || '—'),
+          h('td', { class: 't-asunto' }, r.asunto || h('em', { style: { color: 'var(--texto-3)' } }, 'Sin asunto'), r.obs ? h('span', { class: 't-asunto__obs' }, r.obs) : null),
+          h('td', { class: 't-persona' }, p.primera || '—', p.resto ? h('small', null, p.resto) : null),
+          h('td', { class: 't-fecha' }, fechaCorta(r[cf[0]] || r.fecha)),
+          h('td', null, r.estatus ? insEstatus(r.estatus) : null, ' ', insVence(r)),
+          h('td', { class: 't-iconos' },
+            h('span', { class: r.acuse === 'SI' ? 'si' : '', title: r.acuse === 'SI' ? 'Con acuse' : 'Sin acuse' }, icono(r.acuse === 'SI' ? 'check' : 'reloj')), ' ',
+            r.tiene_archivo || r.tiene_acuse_archivo ? h('span', { title: 'Tiene archivo' }, icono('clip')) : null));
+      })));
+    var movil = h('div', { class: 'tarjeta lista-movil' }, vis.map(function (r) {
+      var p = lineas(r[cp[0]]);
+      return h('div', { class: 'item', onclick: function () { abrirDetalle(r.id); } },
+        h('div', { class: 'item__arriba' }, h('span', { class: 't-num' }, etiquetaNum(r)), r.estatus ? insEstatus(r.estatus) : null, insVence(r),
+          r.acuse === 'SI' ? h('span', { class: 'ins ins--Atendido' }, 'Acuse') : null),
+        h('div', { class: 'item__asunto' }, r.asunto || 'Sin asunto'),
+        h('div', { class: 'item__meta' }, [r.numero, p.primera, fechaCorta(r[cf[0]] || r.fecha)].filter(Boolean).join(' · ')));
+    }));
+    refsReg.res.appendChild(h('div', { class: 'tarjeta' }, h('div', { class: 'tabla-env' }, tabla), movil));
+    if (filas.length > vis.length) {
+      refsReg.res.appendChild(h('div', { class: 'mas' }, h('button', { class: 'btn', onclick: function () { E.mostrar += 100; pintarLista(); } },
+        'Ver más (' + (filas.length - vis.length) + ' restantes)')));
+    }
+  }
+
+  /* ───────────────────────── Detalle ───────────────────────── */
+  var panelActual = null;
+  function cerrarPanel() {
+    if (!panelActual) return;
+    panelActual.velo.remove(); panelActual.panel.remove();
+    document.removeEventListener('keydown', panelActual.tecla);
+    panelActual = null;
+  }
+
+  function abrirDetalle(id) {
+    return llamar('obtener', { id: id }).then(function (d) { pintarDetalle(d); }).catch(fallo);
+  }
+
+  function pintarDetalle(d) {
+    cerrarPanel();
+    var r = d.registro, t = r.tipo, def = tipoDef(t);
+    var velo = h('div', { class: 'velo', onclick: cerrarPanel });
+    var cancelado = r.estatus === 'Cancelado';
+    var acciones = [];
+    if (puedeCapturar(t) && (!cancelado || esAdmin())) acciones.push(h('button', { class: 'btn btn--chico', onclick: function () { formulario(t, r); } }, icono('editar'), 'Editar'));
+    if (def.recibido && !cancelado && puedeCapturar('OFS')) {
+      acciones.push(h('button', { class: 'btn btn--chico', onclick: function () { responder(r); } }, icono('responder'), 'Responder con oficio'));
+    }
+    acciones.push(h('button', { class: 'btn btn--chico btn--fantasma', onclick: function () {
+      var txt = def.singular + ' ' + etiquetaNum(r) + (r.numero ? ' · ' + r.numero : '');
+      (navigator.clipboard ? navigator.clipboard.writeText(txt) : Promise.reject()).then(function () { aviso('Copiado: ' + txt, 'ok'); }, function () { aviso(txt); });
+    } }, icono('copiar'), 'Copiar número'));
+    if (esAdmin() && !cancelado) acciones.push(h('button', { class: 'btn btn--chico btn--peligro', onclick: function () { cancelarRegistro(r); } }, icono('cancelar'), 'Cancelar'));
+
+    var datos = h('dl', { class: 'datos' });
+    function fila(et, valor) { datos.appendChild(h('dt', null, et)); datos.appendChild(h('dd', { class: valor ? '' : 'vacio-dd' }, valor || '—')); }
+    def.campos.forEach(function (c) {
+      var k = c[0], v;
+      if (k === 'dirigido') v = r.dirigido_a;
+      else if (k === 'acuse') v = r.acuse === 'SI' ? 'Sí' : 'No';
+      else if (k === 'fecha' || k === 'fecha_recepcion') v = fechaCorta(r[k]);
+      else v = r[k];
+      fila(c[1], v);
+    });
+
+    var seg = h('dl', { class: 'datos' });
+    function filaSeg(et, valor) { seg.appendChild(h('dt', null, et)); seg.appendChild(h('dd', { class: valor ? '' : 'vacio-dd' }, valor || '—')); }
+    seg.appendChild(h('dt', null, 'Estatus')); seg.appendChild(h('dd', null, insEstatus(r.estatus), ' ', insVence(r)));
+    filaSeg('Fecha límite', fechaCorta(r.fecha_limite));
+    filaSeg('Turnado a', r.turnado_a);
+
+    var ligados = d.ligados.length ? h('div', { style: { display: 'grid', gap: '6px' } }, d.ligados.map(function (x) {
+      var rel = x.id === r.relacionado_id ? 'Responde a' : 'Respondido con';
+      return h('button', { class: 'ligado', onclick: function () { abrirDetalle(x.id); } },
+        h('div', { style: { flex: 1, minWidth: 0 } }, h('div', { style: { fontSize: '12px', color: 'var(--texto-3)' } }, rel + ' · ' + tipoDef(x.tipo).singular),
+          h('div', null, h('strong', { class: 't-num' }, etiquetaNum(x)), ' ', x.numero || ''), h('div', { style: { fontSize: '12.5px' } }, x.asunto)),
+        insEstatus(x.estatus));
+    })) : null;
+
+    var archivos = h('div', { style: { display: 'grid', gap: '8px' } },
+      bloqueArchivo(r, 'oficio', 'Documento escaneado', r.tiene_archivo, r.archivo_nombre),
+      bloqueArchivo(r, 'acuse', t === 'OFE' ? 'Oficio original / acuse' : 'Acuse', r.tiene_acuse_archivo, r.acuse_archivo_nombre));
+
+    var hist = h('ul', { class: 'historial' }, d.historial.length ? d.historial.map(function (x) {
+      return h('li', null, h('strong', null, x.accion), ' · ', h('span', null, fechaCorta(x.fecha) + ' ' + String(x.fecha).slice(11, 16) + ' · ' + x.usuario), x.detalle ? h('div', null, x.detalle) : null);
+    }) : h('li', null, h('span', null, 'Sin movimientos registrados en el sistema.')));
+
+    var panel = h('aside', { class: 'panel', role: 'dialog', 'aria-label': def.singular + ' ' + etiquetaNum(r) },
+      h('div', { class: 'panel__cab' },
+        h('div', { style: { flex: 1, minWidth: 0 } }, h('div', { class: 'panel__tipo' }, def.singular),
+          h('div', { class: 'panel__num' }, etiquetaNum(r)), r.numero ? h('div', { class: 'panel__folio' }, r.numero) : null),
+        h('button', { class: 'icono-btn', 'aria-label': 'Cerrar', onclick: cerrarPanel }, icono('cerrar'))),
+      h('div', { class: 'panel__acciones' }, acciones),
+      h('div', { class: 'panel__cuerpo' },
+        cancelado ? h('div', { class: 'cancelacion' }, h('strong', null, 'Cancelado. '), r.motivo_cancelacion || '') : null,
+        h('section', { class: 'seccion' }, h('h3', null, 'Datos'), datos),
+        h('section', { class: 'seccion' }, h('h3', null, 'Seguimiento'), seg, ligados ? h('div', { style: { marginTop: '10px' } }, ligados) : null),
+        h('section', { class: 'seccion' }, h('h3', null, 'Archivos'), archivos),
+        h('section', { class: 'seccion' }, h('h3', null, 'Historial'), hist),
+        h('div', { style: { fontSize: '12px', color: 'var(--texto-3)' } },
+          'Capturó ' + (r.creado_por || '—') + ' el ' + fechaCorta(r.creado_en) + ' · Última modificación: ' + (r.modificado_por || r.creado_por || '—') + ' ' + fechaCorta(r.modificado_en) +
+          (r.origen && r.origen !== 'App' ? ' · Origen: ' + r.origen : ''))));
+    function tecla(ev) { if (ev.key === 'Escape' && !pila.length) cerrarPanel(); }
+    document.addEventListener('keydown', tecla);
+    document.body.appendChild(velo);
+    document.body.appendChild(panel);
+    panelActual = { velo: velo, panel: panel, tecla: tecla, id: r.id };
+  }
+
+  function bloqueArchivo(r, clase, titulo, tiene, nombre) {
+    var puede = puedeCapturar(r.tipo) && r.estatus !== 'Cancelado';
+    var input = h('input', { type: 'file', accept: '.pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png', class: 'oculto',
+      onchange: function () { if (input.files[0]) subirArchivo(r, clase, input.files[0]).then(function () { abrirDetalle(r.id); cargarListaSiAplica(r.tipo); }).catch(fallo); } });
+    var botones = [];
+    if (tiene) {
+      botones.push(h('button', { class: 'btn btn--chico', onclick: function () { verArchivo(r, clase); } }, icono('bajar'), 'Abrir'));
+      if (puede) {
+        botones.push(h('button', { class: 'btn btn--chico btn--fantasma', onclick: function () { input.click(); } }, 'Reemplazar'));
+        botones.push(h('button', { class: 'icono-btn', title: 'Quitar', 'aria-label': 'Quitar archivo', onclick: function () {
+          confirmar('¿Quitar «' + nombre + '» de este registro?\nQueda 30 días en la papelera de Drive del dueño.', { si: 'Quitar', peligro: true }).then(function (s) {
+            if (s) llamar('quitarArchivo', { id: r.id, clase: clase }).then(function () { aviso('Archivo quitado.', 'ok'); abrirDetalle(r.id); cargarListaSiAplica(r.tipo); }).catch(fallo);
+          });
+        } }, icono('papelera')));
+      }
+    } else if (puede) {
+      botones.push(h('button', { class: 'btn btn--chico', onclick: function () { input.click(); } }, icono('subir'), 'Subir'));
+    }
+    return h('div', { class: 'archivo' + (tiene ? ' tiene' : '') }, h('div', { class: 'archivo__ico' }, icono(tiene ? 'archivo' : 'clip')),
+      h('div', { class: 'archivo__txt' }, h('strong', null, titulo), h('span', null, tiene ? nombre : 'Sin archivo · PDF, JPG o PNG hasta 10 MB')), botones, input);
+  }
+
+  function leerArchivo(f) {
+    return new Promise(function (ok, mal) {
+      var tipos = { 'application/pdf': 1, 'image/jpeg': 1, 'image/png': 1 };
+      var mime = f.type || (/\.pdf$/i.test(f.name) ? 'application/pdf' : /\.png$/i.test(f.name) ? 'image/png' : /\.jpe?g$/i.test(f.name) ? 'image/jpeg' : '');
+      if (!tipos[mime]) return mal(new Error('Solo se aceptan PDF, JPG o PNG.'));
+      if (f.size > 10 * 1024 * 1024) return mal(new Error('El archivo pesa ' + (f.size / 1048576).toFixed(1) + ' MB; el máximo es 10 MB.'));
+      var lector = new FileReader();
+      lector.onload = function () { ok({ nombre: f.name, mime: mime, base64: String(lector.result).split(',')[1] }); };
+      lector.onerror = function () { mal(new Error('No se pudo leer el archivo.')); };
+      lector.readAsDataURL(f);
+    });
+  }
+
+  function subirArchivo(r, clase, f) {
+    return leerArchivo(f).then(function (a) {
+      aviso('Subiendo ' + a.nombre + '…');
+      return llamar('subirArchivo', { id: r.id, clase: clase, nombre: a.nombre, mime: a.mime, base64: a.base64 });
+    }).then(function (res) { aviso('Archivo guardado.', 'ok'); return res; });
+  }
+
+  function verArchivo(r, clase) {
+    llamar('descargarArchivo', { id: r.id, clase: clase }).then(function (a) {
+      descargarBytes(b64aBytes(a.base64), a.nombre, a.mime);
+    }).catch(fallo);
+  }
+
+  function cargarListaSiAplica(t) { if (E.vista === 'registros' && E.tipo === t) cargarLista(); }
+
+  function cancelarRegistro(r) {
+    var motivo = h('textarea', { class: 'entrada', rows: 3, maxlength: 500, placeholder: 'Ej.: se capturó dos veces; el oficio no se envió…' });
+    var v = ventana({ titulo: 'Cancelar ' + tipoDef(r.tipo).singular.toLowerCase() + ' ' + etiquetaNum(r), ancho: 480,
+      cuerpo: [h('div', { class: 'alerta alerta--aviso' }, 'El registro no se borra: queda marcado como cancelado y su número no se vuelve a usar.'), campo('Motivo', motivo, { req: true })],
+      pie: [h('button', { class: 'btn', onclick: function () { v.cerrar(); } }, 'No cancelar'),
+        h('button', { class: 'btn btn--peligro-lleno', onclick: function () {
+          llamar('cancelar', { id: r.id, version: r.version, motivo: motivo.value }).then(function () {
+            v.cerrar(); aviso('Registro cancelado.', 'ok'); abrirDetalle(r.id); cargarListaSiAplica(r.tipo);
+          }).catch(fallo);
+        } }, 'Cancelar registro')] });
+  }
+
+  function responder(orig) {
+    cerrarPanel();
+    formulario('OFS', null, { prefill: {
+      relacionado_id: orig.id,
+      dirigido_id: orig.firma_id, dirigido_a: orig.firma,
+      asunto: 'Respuesta ' + (orig.numero ? 'al oficio ' + orig.numero : 'a ' + tipoDef(orig.tipo).singular.toLowerCase() + ' ' + etiquetaNum(orig)) + (orig.asunto ? ': ' + orig.asunto : '')
+    }, original: orig });
+  }
+
+  /* ───────────────────────── Buscador de personas ───────────────────────── */
+  function comboPersona(etiqueta, inicial, o) {
+    o = o || {};
+    var sel = { id: inicial.id || '', texto: inicial.texto || '' };
+    var input = h('input', { class: 'entrada', autocomplete: 'off', value: lineas(sel.texto).primera, role: 'combobox', 'aria-expanded': 'false', placeholder: 'Escribe para buscar en el directorio…' });
+    var estado = h('div', { class: 'combo__sel' });
+    var lista = h('div', { class: 'combo__lista oculto', role: 'listbox' });
+    var opciones = [], activa = -1;
+    function pintarEstado() {
+      vaciar(estado);
+      if (sel.id) {
+        var p = E.directorio.filter(function (x) { return x.id === sel.id; })[0];
+        var cargo = lineas(sel.texto).resto || (p && p.cargo) || '';
+        estado.appendChild(h('span', { class: 'ok' }, '✓ En directorio')); if (cargo) estado.appendChild(h('span', { class: 'combo__cargo', title: cargo }, '· ' + cargo));
+      } else if (sel.texto) {
+        estado.appendChild(h('span', { class: 'libre' }, 'Texto libre: no está en el directorio'));
+        var resto = lineas(sel.texto).resto; if (resto) estado.appendChild(h('span', { class: 'combo__cargo', title: resto }, '· ' + resto));
+      }
+    }
+    function elegir(p) {
+      sel.id = p.id; sel.texto = p.nombre + (p.cargo ? '\n' + p.cargo : '');
+      input.value = p.nombre; cerrarLista(); pintarEstado();
+      if (o.alCambiar) o.alCambiar(sel);
+    }
+    function cerrarLista() { lista.classList.add('oculto'); input.setAttribute('aria-expanded', 'false'); activa = -1; }
+    function abrir() {
+      var palabras = norm(input.value).split(' ').filter(Boolean);
+      // Primero quienes coinciden por NOMBRE; después por cargo o dependencia
+      var res = E.directorio.map(function (p) {
+        var n = p._n || (p._n = norm(p.nombre));
+        var b = p._b || (p._b = norm(p.nombre + ' ' + p.cargo + ' ' + (p.dependencia || '')));
+        if (!palabras.every(function (w) { return b.indexOf(w) >= 0; })) return null;
+        return { p: p, peso: palabras.every(function (w) { return n.indexOf(w) >= 0; }) ? 0 : 1 };
+      }).filter(Boolean).sort(function (a, b) { return a.peso - b.peso; }).slice(0, 30).map(function (x) { return x.p; });
+      vaciar(lista); opciones = [];
+      res.forEach(function (p) {
+        var b = h('button', { type: 'button', class: 'combo__op', role: 'option', onmousedown: function (ev) { ev.preventDefault(); elegir(p); } }, p.nombre, p.cargo ? h('small', null, p.cargo) : null);
+        opciones.push({ el: b, p: p }); lista.appendChild(b);
+      });
+      if (input.value.trim().length >= 3 && puedeCapturar()) {
+        var nueva = h('button', { type: 'button', class: 'combo__op combo__op--nueva', onmousedown: function (ev) {
+          ev.preventDefault(); cerrarLista();
+          modalPersona({ nombre: input.value.trim() }).then(function (p) { if (p) elegir(p); });
+        } }, '+ Agregar «' + input.value.trim() + '» al directorio');
+        opciones.push({ el: nueva, nueva: true }); lista.appendChild(nueva);
+      }
+      if (!opciones.length) lista.appendChild(h('div', { class: 'combo__op', style: { color: 'var(--texto-3)' } }, 'Sin coincidencias'));
+      lista.classList.remove('oculto'); input.setAttribute('aria-expanded', 'true');
+    }
+    input.addEventListener('input', function () {
+      sel.id = ''; sel.texto = input.value; pintarEstado(); abrir();
+      if (o.alCambiar) o.alCambiar(sel);
+    });
+    input.addEventListener('focus', function () { if (input.value) abrir(); });
+    input.addEventListener('blur', function () { setTimeout(cerrarLista, 120); });
+    input.addEventListener('keydown', function (ev) {
+      if (lista.classList.contains('oculto')) { if (ev.key === 'ArrowDown') abrir(); return; }
+      if (ev.key === 'ArrowDown' || ev.key === 'ArrowUp') {
+        ev.preventDefault();
+        activa = Math.max(0, Math.min(opciones.length - 1, activa + (ev.key === 'ArrowDown' ? 1 : -1)));
+        opciones.forEach(function (x, i) { x.el.classList.toggle('activa', i === activa); });
+        if (opciones[activa]) opciones[activa].el.scrollIntoView({ block: 'nearest' });
+      } else if (ev.key === 'Enter' && activa >= 0 && opciones[activa]) {
+        ev.preventDefault();
+        if (opciones[activa].nueva) opciones[activa].el.dispatchEvent(new MouseEvent('mousedown'));
+        else elegir(opciones[activa].p);
+      } else if (ev.key === 'Escape') { ev.stopPropagation(); cerrarLista(); }
+    });
+    pintarEstado();
+    return { el: campo(etiqueta, h('div', { class: 'combo' }, input, lista), { ancho: o.ancho }), estado: estado, valor: function () { return sel; }, input: input,
+      montarEstado: function () { input.parentNode.parentNode.appendChild(estado); } };
+  }
+
+  function modalPersona(prefill, existente) {
+    return new Promise(function (resolver) {
+      var resuelto = false;
+      var nombre = h('input', { class: 'entrada', value: (existente || prefill).nombre || '', maxlength: 200 });
+      var cargo = h('input', { class: 'entrada', value: (existente || prefill).cargo || '', maxlength: 300 });
+      var dep = h('input', { class: 'entrada', value: (existente || prefill).dependencia || '', maxlength: 200 });
+      var activo = existente && esAdmin() ? h('input', { type: 'checkbox', checked: existente.activo !== 'NO' }) : null;
+      var msg = h('div');
+      function guardar(confirmarNueva) {
+        llamar('guardarPersona', { id: existente ? existente.id : '', nombre: nombre.value, cargo: cargo.value, dependencia: dep.value,
+          activo: activo ? (activo.checked ? 'SI' : 'NO') : undefined, confirmar: !!confirmarNueva }).then(function (r) {
+          var p = r.persona;
+          E.directorio = E.directorio.filter(function (x) { return x.id !== p.id; });
+          if (p.activo === 'SI') E.directorio.push({ id: p.id, nombre: p.nombre, cargo: p.cargo, dependencia: p.dependencia });
+          E.directorio.sort(function (a, b) { return a.nombre.localeCompare(b.nombre, 'es'); });
+          aviso(existente ? 'Datos actualizados.' : 'Agregado al directorio: ' + p.nombre, 'ok');
+          resuelto = true; v.cerrar(); resolver(p);
+        }).catch(function (e) {
+          if (e.codigo === 'PARECIDO') {
+            vaciar(msg).appendChild(h('div', { class: 'alerta alerta--aviso', style: { display: 'grid', gap: '8px' } },
+              h('strong', null, e.message),
+              e.extra.parecidos.map(function (p) {
+                return h('div', { style: { display: 'flex', gap: '8px', alignItems: 'center' } },
+                  h('div', { style: { flex: 1 } }, p.nombre, p.cargo ? h('div', { style: { fontSize: '12px' } }, p.cargo) : null),
+                  h('button', { class: 'btn btn--chico', onclick: function () {
+                    var q = E.directorio.filter(function (x) { return x.id === p.id; })[0] || p;
+                    resuelto = true; v.cerrar(); resolver(q);
+                  } }, 'Es esta'));
+              }),
+              h('button', { class: 'btn btn--chico', onclick: function () { guardar(true); } }, 'No, es otra persona: agregarla')));
+          } else vaciar(msg).appendChild(h('div', { class: 'alerta alerta--error' }, e.message));
+        });
+      }
+      var v = ventana({ titulo: existente ? 'Editar persona' : 'Agregar al directorio', ancho: 520,
+        alCerrar: function () { if (!resuelto) resolver(null); },
+        cuerpo: [msg, campo('Nombre (con grado: Lic., Mtra., C.…)', nombre, { req: true }), campo('Cargo', cargo), campo('Dependencia o área', dep),
+          activo ? h('label', { class: 'casilla' }, activo, 'Activa (aparece al capturar)') : null],
+        pie: [h('button', { class: 'btn', onclick: function () { v.cerrar(); } }, 'Cancelar'), h('button', { class: 'btn btn--prim', onclick: function () { guardar(false); } }, 'Guardar')] });
+    });
+  }
+
+  /* ───────────────────────── Formulario de registro ───────────────────────── */
+  function formulario(t, reg, opciones) {
+    opciones = opciones || {};
+    var def = tipoDef(t), nuevo = !reg, pre = opciones.prefill || {};
+    var base = reg || {};
+    function ini(k, d) { return base[k] !== undefined && base[k] !== null && base[k] !== '' ? base[k] : (pre[k] !== undefined ? pre[k] : d); }
+    var plazo = Number(E.ini.config.plazo_dias) || 0;
+    var ctrl = {}, limiteTocado = !!base.fecha_limite;
+    // Al capturar, propone a quien más se repite en esta libreta (casi siempre
+    // firma el mismo titular y los entrantes van dirigidos a la misma persona).
+    if (nuevo && E.tipo === t && E.lista.length) {
+      [['dirigido_id', 'dirigido_a'], ['firma_id', 'firma']].forEach(function (par) {
+        if (pre[par[0]] || (par[0] === 'firma_id' && def.recibido) || (par[0] === 'dirigido_id' && !def.recibido)) return;
+        var cuenta = {}, mejor = null;
+        E.lista.slice(0, 80).forEach(function (r) {
+          if (!r[par[0]]) return;
+          cuenta[r[par[0]]] = (cuenta[r[par[0]]] || 0) + 1;
+          if (!mejor || cuenta[r[par[0]]] > cuenta[mejor[par[0]]]) mejor = r;
+        });
+        var p = mejor && E.directorio.filter(function (x) { return x.id === mejor[par[0]]; })[0];
+        if (p) { pre[par[0]] = p.id; pre[par[1]] = p.nombre + (p.cargo ? '\n' + p.cargo : ''); }
+      });
+    }
+    var rejilla = h('div', { class: 'rejilla' });
+    var combos = {};
+    def.campos.forEach(function (c) {
+      var k = c[0], et = c[1];
+      if (k === 'dirigido' || k === 'firma') {
+        var idk = k === 'dirigido' ? 'dirigido_id' : 'firma_id', txk = k === 'dirigido' ? 'dirigido_a' : 'firma';
+        var cb = comboPersona(et, { id: ini(idk, ''), texto: ini(txk, '') }, { ancho: false });
+        combos[k] = cb; rejilla.appendChild(cb.el); cb.montarEstado();
+      } else if (k === 'asunto' || k === 'observaciones') {
+        ctrl[k] = h('textarea', { class: 'entrada', rows: k === 'asunto' ? 3 : 3, maxlength: k === 'asunto' ? 3000 : 6000, value: ini(k, '') });
+        rejilla.appendChild(campo(et, ctrl[k], { ancho: true, req: k === 'asunto' }));
+      } else if (k === 'fecha' || k === 'fecha_recepcion') {
+        var defecto = nuevo && ((k === 'fecha' && !def.recibido) || k === 'fecha_recepcion') ? hoyIso() : '';
+        ctrl[k] = h('input', { class: 'entrada', type: 'date', value: ini(k, defecto), min: '2000-01-01', max: '2100-12-31' });
+        rejilla.appendChild(campo(et, ctrl[k], { req: k === 'fecha' }));
+      } else if (k === 'acuse') {
+        ctrl[k] = h('input', { type: 'checkbox', checked: ini(k, 'NO') === 'SI' });
+        rejilla.appendChild(h('div', { class: 'campo' }, h('span', { class: 'campo__et' }, et), h('label', { class: 'casilla' }, ctrl[k], t === 'OFE' ? 'Se tiene el original' : 'Ya se tiene el acuse')));
+      } else if (k === 'elaboro') {
+        var lista = h('datalist', { id: 'dl-elaboro' }, (E.ini.sugerenciasElaboro || []).map(function (s) { return h('option', { value: s }); }));
+        ctrl[k] = h('input', { class: 'entrada', list: 'dl-elaboro', maxlength: 120, value: ini(k, '') });
+        rejilla.appendChild(h('div', null, campo(et, ctrl[k], { ayuda: 'Elige de la lista para que se escriba siempre igual.' }), lista));
+      } else {
+        ctrl[k] = h('input', { class: 'entrada', maxlength: k === 'carpeta' ? 40 : k === 'area' ? 400 : 150, value: ini(k, '') });
+        rejilla.appendChild(campo(et, ctrl[k], { ancho: k === 'area' }));
+      }
+    });
+
+    // Seguimiento
+    var estOps = [['', 'Sin estatus']].concat(E.ini.estatus.filter(function (s) { return s !== 'Cancelado' || esAdmin() || base.estatus === 'Cancelado'; }).map(function (s) { return [s, s]; }));
+    var estDef = nuevo ? (def.recibido ? 'Pendiente' : '') : '';
+    ctrl.estatus = h('select', { class: 'entrada' }, estOps.map(function (o) { return h('option', { value: o[0], selected: o[0] === ini('estatus', estDef) }, o[1]); }));
+    ctrl.fecha_limite = h('input', { class: 'entrada', type: 'date', value: ini('fecha_limite', ''), min: '2000-01-01', max: '2100-12-31', oninput: function () { limiteTocado = true; } });
+    var dlTurno = h('datalist', { id: 'dl-turno' }, E.directorio.map(function (p) { return h('option', { value: p.nombre }); }));
+    ctrl.turnado_a = h('input', { class: 'entrada', list: 'dl-turno', maxlength: 300, value: ini('turnado_a', '') });
+    var relacionado = ini('relacionado_id', '');
+    var cajaRel = h('div');
+    function pintarRel() {
+      vaciar(cajaRel);
+      if (!relacionado) return;
+      var orig = opciones.original;
+      cajaRel.appendChild(h('div', { class: 'alerta alerta--info', style: { display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' } },
+        h('span', { style: { flex: 1 } }, 'En respuesta a ', orig ? tipoDef(orig.tipo).singular.toLowerCase() + ' ' + etiquetaNum(orig) + (orig.numero ? ' (' + orig.numero + ')' : '') : 'otro registro'),
+        h('button', { type: 'button', class: 'btn btn--chico btn--fantasma', onclick: function () { relacionado = ''; pintarRel(); } }, 'Quitar relación')));
+    }
+    pintarRel();
+    var marcarAtendido = opciones.original ? h('input', { type: 'checkbox', checked: true }) : null;
+    if (plazo && def.recibido && ctrl.fecha_recepcion) {
+      var calc = function () { if (!limiteTocado && ctrl.fecha_recepcion.value) ctrl.fecha_limite.value = sumarHabiles(ctrl.fecha_recepcion.value, plazo); };
+      ctrl.fecha_recepcion.addEventListener('change', calc);
+      if (nuevo) calc();
+    }
+    var segui = h('fieldset', { class: 'grupo' }, h('legend', null, 'Seguimiento'),
+      h('div', { class: 'rejilla' }, campo('Estatus', ctrl.estatus), campo('Fecha límite de respuesta', ctrl.fecha_limite, { ayuda: plazo && def.recibido ? 'Se calcula con ' + plazo + ' días hábiles; puedes cambiarla.' : null }),
+        h('div', { class: 'campo ancho' }, campo('Turnado a', ctrl.turnado_a, { ayuda: 'Área o persona que lo atiende.' }), dlTurno),
+        h('div', { class: 'ancho' }, cajaRel),
+        marcarAtendido ? h('label', { class: 'casilla ancho' }, marcarAtendido, 'Al guardar, marcar el original como «Atendido»') : null));
+
+    // Archivos (solo al dar de alta; después se manejan desde el detalle)
+    var fDoc = h('input', { type: 'file', class: 'entrada', accept: '.pdf,.jpg,.jpeg,.png' });
+    var fAcu = h('input', { type: 'file', class: 'entrada', accept: '.pdf,.jpg,.jpeg,.png' });
+    var archivos = nuevo ? h('fieldset', { class: 'grupo' }, h('legend', null, 'Archivos (opcional)'),
+      h('div', { class: 'rejilla' }, campo('Documento escaneado', fDoc), campo(t === 'OFE' ? 'Oficio original / acuse' : 'Acuse', fAcu))) : null;
+
+    var previo = null;
+    if (def.numeroAuto && nuevo) {
+      var max = 0;
+      if (E.tipo === t && E.anio === E.ini.anioActual) E.lista.forEach(function (r) { max = Math.max(max, Number(r.consecutivo) || 0); });
+      var plantilla = E.ini.config.plantilla_OFS || '';
+      var ejemplo = max ? plantilla.replace('{NNN}', pad3(max + 1)).replace('{AAAA}', E.ini.anioActual) : '';
+      previo = h('div', { class: 'numero-previo' }, 'El número se asigna al guardar' + (ejemplo ? ' (si nadie más guarda antes, será ' : '.'),
+        ejemplo ? h('strong', null, ejemplo) : null, ejemplo ? ').' : null);
+    }
+    var msg = h('div');
+    var boton = h('button', { class: 'btn btn--prim', type: 'button', onclick: function () { enviar(false); } }, nuevo ? 'Guardar y asignar número' : 'Guardar cambios');
+    if (!def.numeroAuto && nuevo) boton.textContent = 'Guardar';
+
+    function datos() {
+      var d = { tipo: t };
+      if (!nuevo) { d.id = base.id; d.version = base.version; }
+      Object.keys(ctrl).forEach(function (k) { d[k] = ctrl[k].type === 'checkbox' ? (ctrl[k].checked ? 'SI' : 'NO') : ctrl[k].value; });
+      if (combos.dirigido) { d.dirigido_id = combos.dirigido.valor().id; d.dirigido_a = combos.dirigido.valor().texto; }
+      if (combos.firma) { d.firma_id = combos.firma.valor().id; d.firma = combos.firma.valor().texto; }
+      d.relacionado_id = relacionado;
+      if (marcarAtendido && marcarAtendido.checked) d.marcarAtendido = true;
+      return d;
+    }
+    var original = JSON.stringify(datos());
+
+    function enviar(confirmarDuplicado) {
+      var d = datos();
+      if (!String(d.asunto || '').trim()) { vaciar(msg).appendChild(h('div', { class: 'alerta alerta--error' }, 'Falta el asunto.')); ctrl.asunto.focus(); return; }
+      if (!d.fecha) { vaciar(msg).appendChild(h('div', { class: 'alerta alerta--error' }, 'Falta la fecha.')); ctrl.fecha.focus(); return; }
+      if (confirmarDuplicado) d.confirmarDuplicado = true;
+      boton.disabled = true; boton.textContent = 'Guardando…';
+      llamar('guardar', d).then(function (res) {
+        var r = res.registro;
+        var subidas = Promise.resolve();
+        if (nuevo && fDoc.files[0]) subidas = subidas.then(function () { return subirArchivo(r, 'oficio', fDoc.files[0]); });
+        if (nuevo && fAcu.files[0]) subidas = subidas.then(function () { return subirArchivo(r, 'acuse', fAcu.files[0]); });
+        return subidas.catch(function (e) { aviso('El registro se guardó, pero el archivo no: ' + e.message, 'error'); }).then(function () {
+          v.antesDeCerrar = null; v.cerrar();
+          if (res.sinCambios) aviso('No había cambios que guardar.');
+          else aviso((nuevo ? 'Registrado: ' : 'Guardado: ') + def.singular + ' ' + etiquetaNum(r) + (r.numero && def.numeroAuto ? ' · ' + r.numero : ''), 'ok');
+          if (nuevo && E.anio === E.ini.anioActual) E.ini.conteos[t] = (E.ini.conteos[t] || 0) + 1;
+          if (E.vista === 'registros') cargarLista();
+          else if (E.vista === 'pendientes') vistas.pendientes();
+          abrirDetalle(r.id);
+        });
+      }).catch(function (e) {
+        boton.disabled = false; boton.textContent = nuevo ? (def.numeroAuto ? 'Guardar y asignar número' : 'Guardar') : 'Guardar cambios';
+        if (e.codigo === 'DUPLICADO') {
+          confirmar(e.message, { titulo: 'Número repetido', si: 'Sí, es otro documento: guardar', no: 'Revisar' }).then(function (s) { if (s) enviar(true); });
+        } else {
+          vaciar(msg).appendChild(h('div', { class: 'alerta alerta--error' }, e.message));
+          msg.scrollIntoView({ block: 'nearest' });
+        }
+      });
+    }
+
+    var v = ventana({
+      titulo: nuevo ? 'Nuevo ' + def.singular.toLowerCase() : 'Editar ' + def.singular.toLowerCase() + ' ' + etiquetaNum(base),
+      ancho: 820,
+      cuerpo: [msg, previo, rejilla, segui, archivos],
+      pie: [h('button', { class: 'btn', onclick: function () { v.intentarCerrar(); } }, 'Cancelar'), boton],
+      antesDeCerrar: function () {
+        if (JSON.stringify(datos()) === original && !(fDoc.files && fDoc.files[0]) && !(fAcu.files && fAcu.files[0])) return true;
+        return confirmar('Hay cambios sin guardar. ¿Salir sin guardar?', { si: 'Salir sin guardar', no: 'Seguir editando', peligro: true });
+      }
+    });
+    if (panelActual && !nuevo) cerrarPanel();
+  }
+
+  /* ───────────────────────── Excel ───────────────────────── */
+  var ANCHOS = { numero: 24, dirigido: 34, asunto: 48, fecha: 12, fecha_recepcion: 12, firma: 34, elaboro: 16, acuse: 9, carpeta: 9, area: 30, observaciones: 44 };
+  function exportarExcel(todo) {
+    var anio = E.anio;
+    llamar('exportar', { tipo: todo ? 'TODOS' : E.tipo, anio: anio }).then(function (res) {
+      var tipos = todo ? E.ini.orden : [E.tipo];
+      var ahora = new Date();
+      var cuando = fechaCorta(hoyIso()) + ' ' + ('0' + ahora.getHours()).slice(-2) + ':' + ('0' + ahora.getMinutes()).slice(-2);
+      var hojas = tipos.map(function (t) {
+        var def = tipoDef(t);
+        var filas = res.filas.filter(function (r) { return r.tipo === t; }).sort(function (a, b) { return a.consecutivo - b.consecutivo || (a.sufijo > b.sufijo ? 1 : -1); });
+        var enc = ['Núm. consecutivo'], tiposCol = ['centro'], anchos = [11], extractores = [function (r) { return pad3(r.consecutivo) + (r.sufijo ? ' ' + r.sufijo : ''); }];
+        if (def.numeroAuto) { enc.push('No. de oficio'); tiposCol.push('texto'); anchos.push(24); extractores.push(function (r) { return r.numero; }); }
+        def.campos.forEach(function (c) {
+          var k = c[0];
+          enc.push(c[1]); anchos.push(ANCHOS[k] || 16);
+          tiposCol.push(k === 'fecha' || k === 'fecha_recepcion' ? 'fecha' : k === 'acuse' || k === 'carpeta' ? 'centro' : 'texto');
+          extractores.push(function (r) {
+            if (k === 'dirigido') return r.dirigido_a;
+            if (k === 'acuse') return r.acuse === 'SI' ? 'Sí' : '';
+            return r[k];
+          });
+        });
+        [['Estatus', 13, 'centro', function (r) { return r.estatus + (r.estatus === 'Cancelado' && r.motivo_cancelacion ? ': ' + r.motivo_cancelacion : ''); }],
+          ['Fecha límite', 12, 'fecha', function (r) { return r.fecha_limite; }],
+          ['Turnado a', 24, 'texto', function (r) { return r.turnado_a; }]].forEach(function (x) { enc.push(x[0]); anchos.push(x[1]); tiposCol.push(x[2]); extractores.push(x[3]); });
+        return {
+          nombre: def.nombre,
+          titulos: (E.ini.config.encabezados || []).concat(['Control de Gestión · ' + def.nombre + ' ' + anio, filas.length + ' registros · generado el ' + cuando + ' por ' + E.ini.yo.nombre]),
+          encabezados: enc, anchos: anchos, tipos: tiposCol,
+          filas: filas.map(function (r) { return extractores.map(function (f) { return f(r); }); }),
+          pie: 'Fuente: Control de Gestión. Los registros cancelados conservan su número y muestran el motivo en «Estatus».'
+        };
+      });
+      var bytes = ExcelCG.libro(hojas);
+      descargarBytes(bytes, 'Control de Gestión ' + anio + ' - ' + (todo ? 'Todas las libretas' : tipoDef(E.tipo).nombre) + '.xlsx',
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    }).catch(fallo);
+  }
+
+  /* ───────────────────────── Pendientes ───────────────────────── */
+  vistas.pendientes = function () {
+    var cont = h('div', { class: 'pend' }, h('div', { class: 'tarjeta vacio' }, 'Cargando…'));
+    vaciar(principal).appendChild(h('div', null, h('div', { class: 'titulo-vista' }, h('h1', null, 'Pendientes'),
+      h('span', { class: 'sub' }, 'Lo que está por atender y los oficios que salieron sin acuse')), cont));
+    llamar('pendientes').then(function (p) {
+      pintarInsigniaPendientes(p);
+      vaciar(cont);
+      function item(r, conPersona) {
+        var per = lineas(r.tipo === 'OFS' ? r.dirigido_a : r.firma).primera;
+        return h('div', { class: 'pend__i', tabindex: '0', onclick: function () { abrirDetalle(r.id); }, onkeydown: function (ev) { if (ev.key === 'Enter') abrirDetalle(r.id); } },
+          h('div', null, h('div', { class: 't-num' }, etiquetaNum(r)), h('div', { class: 'pend__tipo' }, tipoDef(r.tipo).singular)),
+          h('div', null, h('div', null, r.asunto || 'Sin asunto'), h('div', { class: 'item__meta' }, [r.numero, conPersona ? per : null, r.turnado_a ? 'Turnado a: ' + r.turnado_a : null, fechaCorta(r.fecha_recepcion || r.fecha)].filter(Boolean).join(' · '))),
+          h('div', { style: { display: 'grid', gap: '4px', justifyItems: 'end' } }, r.estatus ? insEstatus(r.estatus) : null, insVence(r)));
+      }
+      var limite = 150;
+      cont.appendChild(h('section', { class: 'tarjeta' }, h('h2', null, icono('reloj'), 'Por atender', h('span', { class: 'ins' }, p.porAtender.length)),
+        p.porAtender.length ? p.porAtender.slice(0, limite).map(function (r) { return item(r, true); }) : h('div', { class: 'vacio' }, 'Nada pendiente. ¡Bien!'),
+        p.porAtender.length > limite ? h('div', { class: 'vacio' }, 'Y ' + (p.porAtender.length - limite) + ' más. Usa el filtro de estatus en Registros.') : null));
+      cont.appendChild(h('section', { class: 'tarjeta' }, h('h2', null, icono('archivo'), 'Oficios salientes sin acuse', h('span', { class: 'ins' }, p.sinAcuse.length)),
+        p.sinAcuse.length ? p.sinAcuse.slice(0, limite).map(function (r) { return item(r, true); }) : h('div', { class: 'vacio' }, 'Todos los oficios tienen acuse.'),
+        p.sinAcuse.length > limite ? h('div', { class: 'vacio' }, 'Y ' + (p.sinAcuse.length - limite) + ' más. En Registros filtra «Sin acuse».') : null));
+    }).catch(function (e) { fallo(e); vaciar(cont).appendChild(h('div', { class: 'tarjeta vacio' }, e.message)); });
+  };
+
+  /* ───────────────────────── Directorio ───────────────────────── */
+  vistas.directorio = function () {
+    var q = h('input', { class: 'entrada', type: 'search', placeholder: 'Buscar nombre, cargo o dependencia…', 'aria-label': 'Buscar en el directorio' });
+    var lista = h('div', { class: 'tarjeta lista-simple' }, h('div', { class: 'vacio' }, 'Cargando…'));
+    var conteo = h('p', { class: 'conteo' });
+    var datos = [];
+    vaciar(principal).appendChild(h('div', null,
+      h('div', { class: 'titulo-vista' }, h('h1', null, 'Directorio'), h('span', { class: 'sub' }, 'Personas a quienes se dirige o que firman'), h('div', { class: 'titulo-vista__esp' }),
+        puedeCapturar() ? h('button', { class: 'btn btn--prim', onclick: function () { modalPersona({}).then(function (p) { if (p) cargar(); }); } }, icono('mas'), 'Agregar persona') : null),
+      h('div', { class: 'herr' }, h('div', { class: 'buscador' }, icono('buscar'), q)), conteo, lista));
+    function pintar() {
+      var pal = norm(q.value).split(' ').filter(Boolean);
+      var vis = datos.filter(function (p) { var b = norm(p.nombre + ' ' + p.cargo + ' ' + p.dependencia); return pal.every(function (w) { return b.indexOf(w) >= 0; }); });
+      conteo.textContent = vis.length + ' de ' + datos.length + ' personas';
+      vaciar(lista);
+      if (!vis.length) { lista.appendChild(h('div', { class: 'vacio' }, 'Sin coincidencias.')); return; }
+      vis.slice(0, 300).forEach(function (p) {
+        lista.appendChild(h('div', { class: 'fila' },
+          h('div', { class: 'fila__txt' }, h('strong', null, p.nombre), h('span', null, [p.cargo, p.dependencia].filter(Boolean).join(' · ') || 'Sin cargo'),
+            p.activo === 'NO' ? h('span', null, h('span', { class: 'etq etq--gris' }, p.unido_a ? 'Unida a otra ficha' : 'Desactivada')) : null),
+          h('span', { class: 'fila__usos' }, p.usos + ' registro' + (p.usos === 1 ? '' : 's')),
+          esAdmin() && p.activo !== 'NO' ? h('button', { class: 'icono-btn', title: 'Unir con otra ficha (duplicado)', 'aria-label': 'Unir', onclick: function () { unir(p); } }, icono('unir')) : null,
+          esAdmin() ? h('button', { class: 'icono-btn', title: 'Editar', 'aria-label': 'Editar', onclick: function () { modalPersona({}, p).then(function (x) { if (x) cargar(); }); } }, icono('editar')) : null));
+      });
+    }
+    function unir(p) {
+      var destino = null;
+      var cb = comboPersona('Es la misma persona que…', { id: '', texto: '' }, { alCambiar: function (s) { destino = s.id ? s : null; } });
+      var v = ventana({ titulo: 'Unir fichas duplicadas', ancho: 560,
+        cuerpo: [h('div', { class: 'alerta alerta--info' }, 'Los registros de «' + p.nombre + '» pasarán a la ficha que elijas, y esta ficha se desactiva. Úsalo cuando la misma persona está capturada dos veces (con otra ortografía, por ejemplo).'),
+          cb.el],
+        pie: [h('button', { class: 'btn', onclick: function () { v.cerrar(); } }, 'Cancelar'),
+          h('button', { class: 'btn btn--prim', onclick: function () {
+            if (!destino || destino.id === p.id) { aviso('Elige otra ficha del directorio.', 'error'); return; }
+            var nombreDestino = lineas(destino.texto).primera;
+            confirmar('¿Unir «' + p.nombre + '» con «' + nombreDestino + '»?\nNo se puede deshacer desde la app.', { si: 'Unir' }).then(function (s) {
+              if (!s) return;
+              llamar('unirPersonas', { de: p.id, a: destino.id }).then(function (r) {
+                v.cerrar(); aviso('Listo: ' + r.actualizados + ' registros ahora apuntan a «' + nombreDestino + '».', 'ok');
+                E.directorio = E.directorio.filter(function (x) { return x.id !== p.id; });
+                cargar();
+              }).catch(fallo);
+            });
+          } }, 'Unir')] });
+      cb.montarEstado();
+    }
+    function cargar() { llamar('directorio').then(function (d) { datos = d; pintar(); }).catch(fallo); }
+    q.addEventListener('input', pintar);
+    cargar();
+  };
+
+  /* ───────────────────────── Usuarios ───────────────────────── */
+  vistas.usuarios = function () {
+    var cont = h('div', { class: 'tarjeta' }, h('div', { class: 'vacio' }, 'Cargando…'));
+    vaciar(principal).appendChild(h('div', null,
+      h('div', { class: 'titulo-vista' }, h('h1', null, 'Usuarios'), h('span', { class: 'sub' }, 'Quién entra y qué puede hacer'), h('div', { class: 'titulo-vista__esp' }),
+        h('button', { class: 'btn btn--prim', onclick: function () { modalUsuario(null); } }, icono('mas'), 'Nuevo usuario')), cont));
+    function libretasTxt(tipos) {
+      if (tipos === '*') return [h('span', { class: 'etq' }, 'Todas las libretas')];
+      return String(tipos || '').split(',').filter(Boolean).map(function (t) { return h('span', { class: 'etq' }, E.ini.todosTipos[t] ? E.ini.todosTipos[t].nombre : t); });
+    }
+    function cargar() {
+      llamar('usuarios').then(function (us) {
+        vaciar(cont).appendChild(h('div', { class: 'tabla-env', style: { display: 'block' } }, h('table', { class: 'tabla' },
+          h('thead', null, h('tr', null, ['Usuario', 'Nombre', 'Rol', 'Libretas', 'Estado', 'Último acceso', ''].map(function (x) { return h('th', null, x); }))),
+          h('tbody', null, us.map(function (u) {
+            return h('tr', { style: { cursor: 'default' } },
+              h('td', null, h('strong', null, u.usuario)), h('td', null, u.nombre), h('td', null, E.ini.roles[u.rol] || u.rol),
+              h('td', null, libretasTxt(u.tipos)),
+              h('td', null, u.activo === 'SI' ? h('span', { class: 'etq' }, 'Activo') : h('span', { class: 'etq etq--gris' }, 'Inactivo'),
+                u.bloqueado ? h('span', { class: 'etq etq--rojo' }, 'Bloqueado') : null, u.debe_cambiar === 'SI' ? h('span', { class: 'etq etq--gris' }, 'Contraseña temporal') : null),
+              h('td', { class: 't-fecha' }, u.ultimo_acceso ? fechaCorta(u.ultimo_acceso) + ' ' + String(u.ultimo_acceso).slice(11, 16) : 'Nunca'),
+              h('td', { style: { whiteSpace: 'nowrap' } },
+                h('button', { class: 'btn btn--chico', onclick: function () { modalUsuario(u); } }, 'Editar'), ' ',
+                h('button', { class: 'btn btn--chico btn--fantasma', onclick: function () { restablecer(u); } }, 'Nueva contraseña')));
+          })))));
+      }).catch(function (e) { fallo(e); vaciar(cont).appendChild(h('div', { class: 'vacio' }, e.message)); });
+    }
+    function credenciales(usuario, temporal, titulo) {
+      var v = ventana({ titulo: titulo, ancho: 480, sinFoco: true, cuerpo: [
+        h('div', { class: 'cred' }, h('div', null, 'Usuario: ', h('code', null, usuario)), h('div', null, 'Contraseña temporal: ', h('code', null, temporal))),
+        h('div', { class: 'alerta alerta--aviso' }, 'Entrégala en persona o por un medio seguro. Al entrar se le pedirá cambiarla. No se vuelve a mostrar.')],
+        pie: [h('button', { class: 'btn', onclick: function () {
+          var t = 'Usuario: ' + usuario + '\nContraseña temporal: ' + temporal;
+          (navigator.clipboard ? navigator.clipboard.writeText(t) : Promise.reject()).then(function () { aviso('Copiado.', 'ok'); }, function () { aviso('Cópialo a mano.'); });
+        } }, icono('copiar'), 'Copiar'), h('button', { class: 'btn btn--prim', onclick: function () { v.cerrar(); } }, 'Listo')] });
+    }
+    function restablecer(u) {
+      confirmar('¿Crear una contraseña temporal nueva para ' + u.usuario + '?\nSe cerrarán sus sesiones abiertas.', { si: 'Crear contraseña' }).then(function (s) {
+        if (s) llamar('restablecerClave', { usuario: u.usuario }).then(function (r) { credenciales(r.usuario, r.temporal, 'Nueva contraseña temporal'); cargar(); }).catch(fallo);
+      });
+    }
+    function modalUsuario(u) {
+      var nuevo = !u;
+      var usuario = h('input', { class: 'entrada', value: u ? u.usuario : '', readOnly: !nuevo, maxlength: 30, autocapitalize: 'none', spellcheck: 'false', placeholder: 'p. ej. valentina.j' });
+      var nombre = h('input', { class: 'entrada', value: u ? u.nombre : '', maxlength: 120 });
+      var rol = h('select', { class: 'entrada' }, Object.keys(E.ini.roles).map(function (k) { return h('option', { value: k, selected: u ? u.rol === k : k === 'captura' }, E.ini.roles[k]); }));
+      var descRol = h('div', { class: 'campo__ayuda' });
+      var actuales = u ? (u.tipos === '*' ? Object.keys(E.ini.todosTipos) : String(u.tipos).split(',')) : Object.keys(E.ini.todosTipos);
+      var cajas = Object.keys(E.ini.todosTipos).map(function (t) { return { t: t, el: h('input', { type: 'checkbox', checked: actuales.indexOf(t) >= 0 }) }; });
+      var bloqueLib = h('fieldset', { class: 'grupo' }, h('legend', null, 'Libretas que puede ver'),
+        h('div', { class: 'rejilla' }, cajas.map(function (c) { return h('label', { class: 'casilla' }, c.el, E.ini.todosTipos[c.t].nombre); })));
+      var activo = h('input', { type: 'checkbox', checked: !u || u.activo === 'SI' });
+      var desbloquear = u && u.bloqueado ? h('input', { type: 'checkbox', checked: true }) : null;
+      var msg = h('div');
+      function pintarRol() {
+        descRol.textContent = { admin: 'Todo: registros de todas las libretas, cancelar, usuarios, bitácora y configuración.',
+          captura: 'Registra y edita en sus libretas, sube archivos y agrega personas al directorio.',
+          consulta: 'Solo ve, busca, abre archivos y descarga Excel de sus libretas.' }[rol.value];
+        bloqueLib.classList.toggle('oculto', rol.value === 'admin');
+      }
+      rol.addEventListener('change', pintarRol); pintarRol();
+      var v = ventana({ titulo: nuevo ? 'Nuevo usuario' : 'Editar ' + u.usuario, ancho: 620, cuerpo: [msg,
+        h('div', { class: 'rejilla' }, campo('Usuario', usuario, { req: true, ayuda: nuevo ? 'Minúsculas, sin espacios ni acentos. No se puede cambiar después.' : null }), campo('Nombre completo', nombre, { req: true }),
+          h('div', { class: 'campo ancho' }, campo('Rol', rol), descRol)),
+        bloqueLib,
+        nuevo ? null : h('label', { class: 'casilla' }, activo, 'Cuenta activa'),
+        desbloquear ? h('label', { class: 'casilla' }, desbloquear, 'Desbloquear (tiene intentos fallidos)') : null,
+        nuevo ? h('div', { class: 'campo__ayuda' }, 'Se generará una contraseña temporal que tendrá que cambiar al entrar.') : h('div', { class: 'campo__ayuda' }, 'Si cambias rol, libretas o estado, tendrá que volver a entrar.')],
+        pie: [h('button', { class: 'btn', onclick: function () { v.cerrar(); } }, 'Cancelar'),
+          h('button', { class: 'btn btn--prim', onclick: function () {
+            var tipos = rol.value === 'admin' ? '*' : cajas.filter(function (c) { return c.el.checked; }).map(function (c) { return c.t; });
+            if (Array.isArray(tipos) && tipos.length === cajas.length) tipos = '*';
+            llamar('guardarUsuario', { nuevo: nuevo, usuario: usuario.value, nombre: nombre.value, rol: rol.value, tipos: tipos,
+              activo: activo.checked ? 'SI' : 'NO', desbloquear: desbloquear ? desbloquear.checked : false }).then(function (r) {
+              v.cerrar(); cargar();
+              if (r.temporal) credenciales(r.usuario, r.temporal, 'Usuario creado'); else aviso('Usuario actualizado.', 'ok');
+            }).catch(function (e) { vaciar(msg).appendChild(h('div', { class: 'alerta alerta--error' }, e.message)); });
+          } }, nuevo ? 'Crear usuario' : 'Guardar')] });
+    }
+    cargar();
+  };
+
+  /* ───────────────────────── Bitácora ───────────────────────── */
+  vistas.bitacora = function () {
+    var f = { desde: h('input', { class: 'entrada', type: 'date', 'aria-label': 'Desde' }), hasta: h('input', { class: 'entrada', type: 'date', 'aria-label': 'Hasta' }),
+      usuario: h('select', { class: 'entrada', 'aria-label': 'Usuario' }, h('option', { value: '' }, 'Todos los usuarios')),
+      accion: h('select', { class: 'entrada', 'aria-label': 'Acción' }, h('option', { value: '' }, 'Todas las acciones')),
+      texto: h('input', { class: 'entrada', type: 'search', placeholder: 'Buscar en el detalle…', 'aria-label': 'Buscar en el detalle' }) };
+    var cont = h('div', { class: 'tarjeta' }, h('div', { class: 'vacio' }, 'Cargando…'));
+    var conteo = h('p', { class: 'conteo' });
+    var primera = true, espera = null;
+    vaciar(principal).appendChild(h('div', null, h('div', { class: 'titulo-vista' }, h('h1', null, 'Bitácora'), h('span', { class: 'sub' }, 'Todo lo que se hace en el sistema queda aquí y no se puede borrar desde la app')),
+      h('div', { class: 'herr' }, f.desde, f.hasta, f.usuario, f.accion, h('div', { class: 'buscador' }, icono('buscar'), f.texto)), conteo, cont));
+    function cargar() {
+      llamar('bitacora', { desde: f.desde.value, hasta: f.hasta.value, usuario: f.usuario.value, accion: f.accion.value, texto: f.texto.value }).then(function (r) {
+        if (primera) {
+          r.usuarios.forEach(function (u) { f.usuario.appendChild(h('option', { value: u }, u)); });
+          r.acciones.forEach(function (a) { f.accion.appendChild(h('option', { value: a }, a)); });
+          primera = false;
+        }
+        conteo.textContent = r.total > r.filas.length ? 'Mostrando los ' + r.filas.length + ' más recientes de ' + r.total : r.total + ' movimientos';
+        vaciar(cont).appendChild(r.filas.length ? h('div', { class: 'tabla-env', style: { display: 'block' } }, h('table', { class: 'tabla bit' },
+          h('thead', null, h('tr', null, ['Fecha', 'Usuario', 'Acción', 'Detalle'].map(function (x) { return h('th', null, x); }))),
+          h('tbody', null, r.filas.map(function (x) {
+            return h('tr', { style: { cursor: x.registro_id && /^(r|m-)/.test(x.registro_id) ? 'pointer' : 'default' }, onclick: function () { if (x.registro_id && /^(r|m-)/.test(x.registro_id)) abrirDetalle(x.registro_id); } },
+              h('td', null, fechaCorta(x.fecha) + ' ' + String(x.fecha).slice(11, 16)), h('td', null, x.usuario), h('td', null, x.accion), h('td', null, x.detalle));
+          })))) : h('div', { class: 'vacio' }, 'Sin movimientos con esos filtros.'));
+      }).catch(fallo);
+    }
+    [f.desde, f.hasta, f.usuario, f.accion].forEach(function (x) { x.addEventListener('change', cargar); });
+    f.texto.addEventListener('input', function () { clearTimeout(espera); espera = setTimeout(cargar, 400); });
+    cargar();
+  };
+
+  /* ───────────────────────── Configuración ───────────────────────── */
+  vistas.config = function () {
+    var c = E.ini.config, enc = c.encabezados || [];
+    var e1 = h('input', { class: 'entrada', value: enc[0] || '', maxlength: 200 });
+    var e2 = h('input', { class: 'entrada', value: enc[1] || '', maxlength: 200 });
+    var e3 = h('input', { class: 'entrada', value: enc[2] || '', maxlength: 200 });
+    var pl = h('input', { class: 'entrada', value: c.plantilla_OFS || '', maxlength: 200 });
+    var ej = h('div', { class: 'campo__ayuda' });
+    var plazo = h('input', { class: 'entrada', type: 'number', min: 0, max: 365, value: c.plazo_dias || '', style: { maxWidth: '160px' } });
+    var web = h('input', { class: 'entrada', type: 'url', value: c.url_web || '', maxlength: 200, placeholder: 'https://control-gestion.vercel.app' });
+    function pintarEj() { ej.textContent = pl.value ? 'Ejemplo: ' + pl.value.replace('{NNN}', '417').replace('{AAAA}', E.ini.anioActual) : 'Sin plantilla: los oficios salientes solo tendrán consecutivo.'; }
+    pl.addEventListener('input', pintarEj); pintarEj();
+    vaciar(principal).appendChild(h('div', null, h('div', { class: 'titulo-vista' }, h('h1', null, 'Configuración')),
+      h('div', { class: 'tarjeta config' },
+        campo('Encabezado · línea 1', e1), campo('Encabezado · línea 2', e2), campo('Encabezado · línea 3', e3, { ayuda: 'Salen en la pantalla de entrada y arriba de cada Excel.' }),
+        h('div', null, campo('Número oficial de los oficios salientes', pl, { ayuda: '{NNN} es el consecutivo (001, 002…) y {AAAA} el año.' }), ej),
+        campo('Plazo de respuesta por omisión (días hábiles)', plazo, { ayuda: 'Para entrantes: propone la fecha límite a partir de la fecha de recibido. Vacío o 0 = sin fecha límite automática.' }),
+        campo('Dirección pública de la app', web, { ayuda: 'Si la publicaste en Vercel, ponla aquí: la dirección de Google (/exec) solo mostrará un enlace a ella. Vacío = se usa la de Google.' }),
+        h('div', null, h('button', { class: 'btn btn--prim', onclick: function () {
+          llamar('guardarConfig', { encabezado_1: e1.value, encabezado_2: e2.value, encabezado_3: e3.value, plantilla_OFS: pl.value, plazo_dias: plazo.value === '0' ? '' : plazo.value, url_web: web.value.trim() }).then(function (cfg) {
+            E.ini.config = { encabezados: [cfg.encabezado_1, cfg.encabezado_2, cfg.encabezado_3].filter(Boolean), plantilla_OFS: cfg.plantilla_OFS, plazo_dias: cfg.plazo_dias, url_web: cfg.url_web || '' };
+            aviso('Configuración guardada.', 'ok');
+          }).catch(fallo);
+        } }, 'Guardar'))),
+      h('div', { class: 'tarjeta config', style: { marginTop: '16px' } }, h('h2', { style: { fontSize: '16px' } }, 'Seguridad'),
+        h('ul', { style: { margin: 0, paddingLeft: '18px', display: 'grid', gap: '6px', color: 'var(--texto-2)' } },
+          h('li', null, 'La hoja de cálculo y las carpetas de Drive del sistema no deben compartirse con nadie: todos entran por esta app.'),
+          h('li', null, 'Para revisarlo, el dueño de la hoja corre revisarSeguridad() desde Extensiones → Apps Script.'),
+          h('li', null, 'Cada lunes se guarda una copia de la base en la carpeta «Respaldos» (se conservan las 8 más recientes).'),
+          h('li', null, 'Cuando alguien deja el área: Usuarios → Editar → desmarca «Cuenta activa». Su historial se conserva.')))));
+  };
+
+  /* ───────────────────────── Arranque ───────────────────────── */
+  llamar('estado').then(function (p) {
+    E.publico = p;
+    if (E.token) cargarInicio(); else pantallaEntrar();
+  }).catch(function (e) {
+    vaciar(app).appendChild(h('div', { class: 'arranque' }, h('div', { class: 'arranque__marca' }, 'Control de Gestión'),
+      h('div', { class: 'alerta alerta--error', style: { maxWidth: '520px' } }, e.message)));
+  });
+})();
+</script>
