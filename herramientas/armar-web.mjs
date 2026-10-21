@@ -52,15 +52,29 @@ for (const [n, c] of Object.entries(archivos)) {
 }
 const v = Object.fromEntries(Object.entries(archivos).map(([n, c]) => [n, huella(c)]));
 
-let html = leer("Index.html")
-  .replace(/\s*<base target="_top">/, "")
-  .replace("<meta charset=\"utf-8\">", '<meta charset="utf-8">\n  <meta name="referrer" content="no-referrer">\n  <title>Control de Gestión</title>\n  <link rel="icon" href="favicon.svg?v=' + v["favicon.svg"] + '" type="image/svg+xml">')
-  .replace("<!--ESTILOS-->", `<link rel="stylesheet" href="estilos.css?v=${v["estilos.css"]}">`)
-  .replace("<!--EXCEL-->", `<script src="excel.js?v=${v["excel.js"]}"></script>`)
-  .replace("<!--APP-->", `<script src="config.js?v=${v["config.js"]}"></script>\n  <script src="app.js?v=${v["app.js"]}"></script>`);
-
-if (/<!--(ESTILOS|EXCEL|APP)-->/.test(html)) throw new Error("Index.html: faltó reemplazar algún marcador");
-if (/<script>(?!<\/script>)|<style>/.test(html)) throw new Error("Index.html: quedó código en línea (la CSP lo bloquearía)");
+const cuerpo = leer("Index.html").trim();
+if (/<script|<style|<!--/i.test(cuerpo)) throw new Error("Index.html debe ser solo el cuerpo (sin <script>, <style> ni comentarios)");
+const html = `<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <title>Control de Gestión</title>
+  <link rel="icon" href="favicon.svg?v=${v["favicon.svg"]}" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cabin:wght@500;600;700&family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="estilos.css?v=${v["estilos.css"]}">
+</head>
+<body>
+${cuerpo}
+  <script src="excel.js?v=${v["excel.js"]}"></script>
+  <script src="config.js?v=${v["config.js"]}"></script>
+  <script src="app.js?v=${v["app.js"]}"></script>
+</body>
+</html>
+`;
 
 rmSync(DIST, { recursive: true, force: true });
 mkdirSync(DIST, { recursive: true });

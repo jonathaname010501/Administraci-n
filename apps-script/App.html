@@ -4,8 +4,8 @@
 
    · Todo pasa por llamar(accion, datos) → google.script.run.api(token,…)
    · Nada de innerHTML con datos: la interfaz se arma con h(), que crea
-     nodos y pone el texto como texto. Así un asunto con "<script>" se ve
-     tal cual y no se ejecuta.
+     nodos y pone el texto como texto. Así un asunto con etiquetas HTML se
+     ve tal cual y no se ejecuta.
    · El token de sesión vive en sessionStorage (se borra al cerrar la
      pestaña) y la sesión expira sola en el servidor tras 3 h sin uso.
    ════════════════════════════════════════════════════════════════════ */
@@ -132,7 +132,16 @@
       headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(cuerpo) })
       .then(function (r) {
         if (!r.ok) throw new Error('HTTP ' + r.status);
-        return r.json();
+        return r.text();
+      })
+      .then(function (t) {
+        try { return JSON.parse(t); } catch (x) {
+          // Google contestó, pero con una página en vez de datos: casi siempre
+          // es que la implementación publicada no tiene el código nuevo.
+          var e = new Error('El servidor de Google respondió algo inesperado. Revisa que la implementación de Apps Script tenga la versión más reciente (Implementar → Gestionar implementaciones → Nueva versión).');
+          e.codigo = 'SERVIDOR';
+          throw e;
+        }
       });
   }
 
@@ -146,9 +155,12 @@
       if (e.codigo === 'SESION') { terminarSesion(e.message); }
       else if (e.codigo === 'CAMBIAR_CLAVE') { pantallaCambiarClave(true); }
       throw e;
-    }, function () {
+    }, function (err) {
       progreso(-1);
-      var e = new Error('No hubo conexión con el servidor. Revisa tu internet e intenta de nuevo.');
+      if (err && err.codigo === 'SERVIDOR') throw err;
+      var e = new Error(window.CG_API && !(window.google && google.script)
+        ? 'No hubo conexión con el servidor de Google. Revisa tu internet; si sigue igual, revisa que la implementación diga «Cualquier usuario» y que CG_API_URL en Vercel sea la URL /exec.'
+        : 'No hubo conexión con el servidor. Revisa tu internet e intenta de nuevo.');
       e.codigo = 'RED';
       throw e;
     });

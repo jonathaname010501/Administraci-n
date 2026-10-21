@@ -55,14 +55,15 @@ test("solo estas funciones se pueden llamar desde el navegador", () => {
   assert.throws(() => e.run("hashClave_", "x"), /no es una función pública/);
 });
 
-test("doGet arma la página completa con estilos, Excel y app", () => {
+test("doGet arma la página completa con estilos, Excel y app (aunque Google quite los comentarios)", () => {
   const e = crearEntorno();
   const html = e.run("doGet").html;
-  assert.doesNotMatch(html, /<!--(ESTILOS|EXCEL|APP)-->/);
-  assert.match(html, /--morado: #8f4889/);
-  assert.match(html, /var ExcelCG = /);
-  assert.match(html, /function llamar\(accion, datos\)/);
-  assert.match(html, /\$\{|\$&|\$'|function/, "el contenido con $ llega intacto");
+  assert.match(html, /^<!DOCTYPE html><html lang="es"><head>/);
+  assert.match(html, /<style>[\s\S]*--morado: #8f4889[\s\S]*<\/style>\s*<\/head><body>/, "estilos dentro del head");
+  assert.match(html, /<div id="app" class="app">/);
+  assert.match(html, /<script>[\s\S]*var ExcelCG = [\s\S]*<\/script>/);
+  assert.match(html, /<script>[\s\S]*function llamar\(accion, datos\)[\s\S]*<\/script>\s*<\/body><\/html>$/);
+  assert.equal((html.match(/<script>/g) || []).length, 2, "solo los dos bloques de código");
 });
 
 testBase("API para Vercel (doPost): mismas reglas que google.script.run", () => {

@@ -30,6 +30,7 @@ var SESION_SEG = 3 * 60 * 60;      // 3 h sin actividad cierran la sesión
 var MAX_ARCHIVO_MB = 10;
 var MIMES_PERMITIDOS = ['application/pdf', 'image/jpeg', 'image/png'];
 
+var FUENTES_URL = 'https://fonts.googleapis.com/css2?family=Cabin:wght@500;600;700&family=Roboto:wght@400;500;700&display=swap';
 var HOJAS = { REG: 'Registros', DIR: 'Directorio', USR: 'Usuarios', BIT: 'Bitacora', CFG: 'Config' };
 
 var COLS = {
@@ -92,12 +93,13 @@ function doGet() {
       '<p><a style="font-size:18px;color:#8f4889" href="' + escHtml_(web) + '">' + escHtml_(web) + '</a></p></body></html>')
       .setTitle('Control de Gestión');
   }
-  // La página se arma uniendo los archivos HTML del proyecto (sin plantillas).
-  // Se reemplaza con función para que un "$" dentro del código no se interprete.
-  var html = incluir_('Index');
-  ['Estilos', 'Excel', 'App'].forEach(function (n) {
-    html = html.replace('<!--' + n.toUpperCase() + '-->', function () { return incluir_(n); });
-  });
+  // La página se arma pegando los archivos HTML del proyecto. Ojo: Google
+  // quita los comentarios <!-- --> de los archivos, así que no se usan como
+  // marcadores: Index.html es solo el cuerpo y aquí se arma el resto.
+  var html = '<!DOCTYPE html><html lang="es"><head><base target="_top"><meta charset="utf-8">' +
+    '<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>' +
+    '<link href="' + FUENTES_URL + '" rel="stylesheet">' +
+    incluir_('Estilos') + '</head><body>' + incluir_('Index') + incluir_('Excel') + incluir_('App') + '</body></html>';
   return HtmlService.createHtmlOutput(html)
     .setTitle('Control de Gestión')
     .addMetaTag('viewport', 'width=device-width, initial-scale=1')

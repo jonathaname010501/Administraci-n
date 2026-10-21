@@ -186,7 +186,8 @@ function crearEntorno({ dueno = "dueno@gmail.com" } = {}) {
   };
 
   // ── HtmlService (plantillas <?!= ?>) ──────────────────────────────
-  const leerHtml = (n) => fs.readFileSync(path.join(DIR, n + ".html"), "utf8");
+  // Como Google: al leer un archivo HTML del proyecto se pierden los comentarios <!-- -->.
+  const leerHtml = (n) => fs.readFileSync(path.join(DIR, n + ".html"), "utf8").replace(/<!--[\s\S]*?-->/g, "");
   const salida = (html) => { const o = { html, getContent: () => o.html, setTitle: (t) => { o.titulo = t; return o; }, addMetaTag: () => o, setXFrameOptionsMode: () => o }; return o; };
   const HtmlService = {
     XFrameOptionsMode: { DEFAULT: "DEFAULT", ALLOWALL: "ALLOWALL" },

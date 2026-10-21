@@ -134,7 +134,7 @@ tipografías de Google Fonts.
 apps-script/      El código de la app (lo que va al editor de Apps Script)
   Servidor.gs       api(): sesión, permisos, registros, archivos, directorio, usuarios
   Instalacion.gs    instalar(), restablecerAdministrador(), revisarSeguridad(), respaldoSemanal()
-  Index.html        esqueleto de la página
+  Index.html        cuerpo de la página (Google quita los comentarios HTML: no usarlos como marcadores)
   Estilos.html      identidad CDMX (morado, guinda, dorado; Cabin y Roboto)
   App.html          la aplicación (sin librerías externas)
   Excel.html        genera el .xlsx en el navegador (sin librerías externas)
