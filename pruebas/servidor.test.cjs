@@ -448,3 +448,21 @@ test("armar-web: arma dist/ para Vercel sin código en línea y exige la URL del
   assert.match(csp, /connect-src https:\/\/script\.google\.com https:\/\/script\.googleusercontent\.com;/);
   assert.match(csp, /frame-ancestors 'none'/);
 });
+
+testBase("indicadores del portal: por libreta y solo de las libretas propias", () => {
+  const e = preparar();
+  const ind = e.api(e.admin, "indicadores").datos;
+  assert.equal(ind.porTipo.OFS.total, 416);
+  assert.equal(ind.porTipo.VOL.total, 16);
+  assert.ok(ind.porTipo.OFS.porAtender >= 14);
+  assert.ok(ind.porTipo.OFS.sinAcuse > 300);
+  assert.equal(ind.global.sinAcuse, e.api(e.admin, "pendientes").datos.sinAcuse.length, "el portal dice lo mismo que la pantalla de Pendientes");
+  const r = e.api(e.admin, "guardar", { tipo: "OFE", asunto: "Vencido de prueba", fecha: "2026-10-01", estatus: "Pendiente", fecha_limite: "2026-10-02" }).datos.registro;
+  assert.ok(r);
+  assert.equal(e.api(e.admin, "indicadores").datos.porTipo.OFE.vencidos, ind.porTipo.OFE.vencidos + 1);
+  const cap = alta(e, "beto", "captura", ["CIR"]);
+  const suyo = e.api(cap, "indicadores").datos;
+  assert.deepEqual(Object.keys(suyo.porTipo), ["CIR"], "no ve números de otras libretas");
+  assert.equal(suyo.global.sinAcuse, 0);
+  assert.ok(e.api(cap, "inicio").datos.indicadores.porTipo.CIR.total >= 77);
+});

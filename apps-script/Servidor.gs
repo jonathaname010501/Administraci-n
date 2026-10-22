@@ -163,6 +163,7 @@ var ACCIONES_ = {
   salir: { fn: salir_ },
   cambiarClave: { fn: cambiarClave_ },
   inicio: { fn: inicio_ },
+  indicadores: { fn: function (yo) { return indicadores_(yo); } },
   listar: { fn: listar_ },
   obtener: { fn: obtener_ },
   guardar: { fn: guardar_, rol: 'captura' },
@@ -388,9 +389,37 @@ function inicio_(yo) {
     anios: Object.keys(anios).map(Number).sort(function (a, b) { return b - a; }),
     conteos: conteos,
     sugerenciasElaboro: Object.keys(elaboro).sort(function (a, b) { return elaboro[b] - elaboro[a]; }).slice(0, 60),
+    indicadores: indicadores_(yo, regs),
     directorio: directorioActivo_(),
     version: VERSION
   };
+}
+
+/** Números de las tarjetas del portal: por libreta y en total (solo libretas propias). */
+function indicadores_(yo, regs) {
+  regs = regs || tabla_(HOJAS.REG).filas;
+  var hoy = Utilities.formatDate(new Date(), ZONA, 'yyyy-MM-dd');
+  var anio = Number(hoy.slice(0, 4)), mes = hoy.slice(0, 7);
+  var porTipo = {}, global = { porAtender: 0, vencidos: 0, venceHoy: 0, sinAcuse: 0 };
+  yo.tipos.forEach(function (t) { porTipo[t] = { total: 0, porAtender: 0, vencidos: 0, venceHoy: 0, sinAcuse: 0, esteMes: 0 }; });
+  regs.forEach(function (f) {
+    var r = f.o, p = porTipo[r.tipo];
+    if (!p) return;
+    var activo = r.estatus === 'Pendiente' || r.estatus === 'En trámite';
+    if (activo) {
+      p.porAtender++; global.porAtender++;
+      if (r.fecha_limite && r.fecha_limite < hoy) { p.vencidos++; global.vencidos++; }
+      else if (r.fecha_limite === hoy) { p.venceHoy++; global.venceHoy++; }
+    }
+    // global.sinAcuse = la sección "sin acuse" de Pendientes (sin repetir lo que ya está por atender)
+    if (r.tipo === 'OFS' && r.acuse !== 'SI' && r.estatus !== 'Cancelado' && !activo && Number(r.anio) >= anio - 1) global.sinAcuse++;
+    if (Number(r.anio) === anio) {
+      p.total++;
+      if (r.tipo === 'OFS' && r.acuse !== 'SI' && r.estatus !== 'Cancelado') p.sinAcuse++;   // igual que el indicador de la libreta
+      if (String(r.fecha_recepcion || r.fecha).slice(0, 7) === mes) p.esteMes++;
+    }
+  });
+  return { porTipo: porTipo, global: global, hoy: hoy };
 }
 
 function directorioActivo_() {

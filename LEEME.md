@@ -26,6 +26,20 @@ Para instalarlo: **[INSTALAR.md](INSTALAR.md)**.
 | Se comparte el archivo completo | La hoja no se comparte: cada quien ve **solo sus libretas** según su rol. |
 | Excel para entregar | Botón **Excel** (una libreta o todas) con encabezado institucional, fechas reales, filtros y la fila de títulos fija. |
 
+## Cómo se ve
+
+Igual que Gabinetes:
+
+- **Al entrar hay un portal** con saludo y tarjetas de color. Cada tarjeta muestra
+  sus números del año, lo que está por atender, lo vencido y los oficios sin acuse.
+- **Cada libreta abre su propia pantalla** con "← Inicio", su color y sus indicadores.
+  Al tocar un indicador ("Por atender", "Vencidos", "Sin acuse", "De este mes") se
+  filtra la lista.
+- **Pendientes, Directorio y Administración** (Usuarios, Bitácora, Configuración)
+  también tienen su tarjeta y su pantalla.
+- **En Vercel funciona el botón Atrás** del navegador, y cada pantalla tiene su
+  dirección (por ejemplo `#/oficios-entrantes`).
+
 ## Las libretas
 
 Las mismas seis hojas del minutario, con sus columnas:

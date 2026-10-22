@@ -38,7 +38,19 @@
     ojoNo: '<path d="M17.9 17.9A10.1 10.1 0 0 1 12 20C5 20 1 12 1 12a18.5 18.5 0 0 1 5.1-5.9M9.9 4.2A9.1 9.1 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.2 3.2M1 1l22 22"/>',
     unir: '<path d="M8 3v6a4 4 0 0 0 4 4h0a4 4 0 0 1 4 4v4M16 3v6a4 4 0 0 1-4 4"/>',
     copiar: '<rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
-    papelera: '<path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>'
+    papelera: '<path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>',
+    atras: '<path d="m15 18-6-6 6-6"/>',
+    siguiente: '<path d="m9 18 6-6-6-6"/>',
+    flecha: '<path d="M7 17 17 7"/><path d="M8 7h9v9"/>',
+    enviar: '<path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/>',
+    bandeja: '<path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.5 5.1 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.5-6.9A2 2 0 0 0 16.8 4H7.2a2 2 0 0 0-1.7 1.1z"/>',
+    conocimiento: '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M7.8 14.5s1.6-2.7 4.2-2.7 4.2 2.7 4.2 2.7-1.6 2.7-4.2 2.7-4.2-2.7-4.2-2.7z"/><circle cx="12" cy="14.5" r="1"/>',
+    megafono: '<path d="m3 11 16-5v12L3 13z"/><path d="M11.6 16.4a3 3 0 1 1-5.8-1.6"/><path d="M21 9v4"/>',
+    tarjeta: '<rect x="2.5" y="5" width="19" height="14" rx="2"/><path d="M2.5 9.5h19M6.5 13.5h5M6.5 16h8"/>',
+    turnar: '<path d="M15 14l5-5-5-5"/><path d="M4 20v-7a4 4 0 0 1 4-4h12"/>',
+    alarma: '<circle cx="12" cy="13" r="8"/><path d="M12 9v4l2 2M5 3 2 6M22 6l-3-3"/>',
+    contactos: '<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20V3H6.5A2.5 2.5 0 0 0 4 5.5z"/><circle cx="12" cy="9" r="2.5"/><path d="M8.5 14a3.5 3.5 0 0 1 7 0"/>',
+    pulso: '<path d="M2.5 13h4l2.3 6 4-14 2.3 8h4.9"/>'
   };
 
   function icono(n) {
@@ -355,6 +367,28 @@
   }
 
   /* ───────────────────────── Estructura ───────────────────────── */
+  // Igual que Gabinetes: al entrar, un PORTAL con tarjetas de color; cada
+  // tarjeta abre su propia pantalla, con "← Inicio" arriba.
+  var LOGO = 'data:image/png;base64,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';
+  var COLOR_TIPO = { OFS: 'morado', OFE: 'verde', OFC: 'azul', CIR: 'guinda', TAR: 'cafe', VOL: 'magenta' };
+  var ICONO_TIPO = { OFS: 'enviar', OFE: 'bandeja', OFC: 'conocimiento', CIR: 'megafono', TAR: 'tarjeta', VOL: 'turnar' };
+  var DESC_TIPO = {
+    OFS: 'Los oficios que firma la Subsecretaría, con número automático.',
+    OFE: 'Lo que llega: quién lo manda, a quién se turna y cuándo vence.',
+    OFC: 'Copias que llegan solo para conocimiento.',
+    CIR: 'Circulares recibidas de otras áreas y dependencias.',
+    TAR: 'Tarjetas informativas que entregan las áreas.',
+    VOL: 'Volantes de turno de la Secretaría Particular.'
+  };
+  var MODULOS = {
+    pendientes: { titulo: 'Pendientes', icono: 'alarma', color: 'guinda' },
+    directorio: { titulo: 'Directorio', icono: 'contactos', color: 'azul' },
+    usuarios: { titulo: 'Usuarios', icono: 'usuarios', color: 'guinda' },
+    bitacora: { titulo: 'Bitácora', icono: 'pulso', color: 'azul' },
+    config: { titulo: 'Configuración', icono: 'engrane', color: 'morado' }
+  };
+  var usaHistorial = !(window.google && google.script);
+
   function cargarInicio() {
     return llamar('inicio').then(function (ini) {
       E.ini = ini;
@@ -362,85 +396,202 @@
       if (!E.tipo || ini.orden.indexOf(E.tipo) < 0) E.tipo = ini.orden[0];
       E.anio = E.anio || ini.anioActual;
       montar();
-      irA(E.vista && navBotones[E.vista] ? E.vista : 'registros');
-      llamar('pendientes').then(pintarInsigniaPendientes).catch(function () {});
+      var desde = usaHistorial ? leerRuta() : null;
+      irA(desde ? desde.vista : 'inicio', desde ? desde.tipo : null, { reemplazar: true });
     }).catch(function (e) { if (e.codigo !== 'SESION' && e.codigo !== 'CAMBIAR_CLAVE') pantallaEntrar(e.message); });
   }
 
-  var navBotones = {};
   var principal = null;
   function montar() {
-    var yo = E.ini.yo;
     document.title = 'Control de Gestión';
-    var items = [['registros', 'Registros', 'lista'], ['pendientes', 'Pendientes', 'reloj'], ['directorio', 'Directorio', 'libro']];
-    if (esAdmin()) items.push(['usuarios', 'Usuarios', 'usuarios'], ['bitacora', 'Bitácora', 'historia'], ['config', 'Configuración', 'engrane']);
-    navBotones = {};
-    var nav = h('nav', { class: 'nav', 'aria-label': 'Secciones' }, h('div', { class: 'nav__fila' }, items.map(function (it) {
-      var b = h('button', { class: 'nav__i', onclick: function () { irA(it[0]); } }, icono(it[2]), it[1]);
-      navBotones[it[0]] = b;
-      return b;
-    })));
-    principal = h('main', { class: 'principal', id: 'vista' });
-    vaciar(app).appendChild(h('div', null,
-      h('header', { class: 'barra' }, h('div', { class: 'barra__fila' },
-        h('div', { class: 'barra__marca' }, h('div', { class: 'barra__titulo' }, 'Control de Gestión'), h('div', { class: 'barra__dep' }, (E.ini.config.encabezados || []).slice(1).join(' · '))),
-        h('div', { class: 'barra__esp' }),
-        h('div', { class: 'barra__yo' }, h('strong', null, yo.nombre), h('span', null, yo.rolNombre)),
-        h('button', { class: 'icono-btn', title: 'Cambiar mi contraseña', 'aria-label': 'Cambiar mi contraseña', onclick: function () { pantallaCambiarClave(false); } }, icono('llave')),
-        h('button', { class: 'icono-btn', title: 'Salir', 'aria-label': 'Salir', onclick: function () { llamar('salir').catch(function () {}).then(function () { terminarSesion('Saliste del sistema.'); }); } }, icono('salir')))),
-      nav, principal));
+    principal = h('div', { class: 'raiz', id: 'vista' });
+    vaciar(app).appendChild(principal);
   }
 
-  function pintarInsigniaPendientes(p) {
-    var b = navBotones.pendientes;
-    if (!b) return;
-    var viejo = b.querySelector('.nav__num'); if (viejo) viejo.remove();
-    var urgentes = p.porAtender.filter(function (r) { return r.fecha_limite && diasHasta(r.fecha_limite) <= 0; }).length;
-    if (urgentes) b.appendChild(h('span', { class: 'nav__num', title: 'Vencidos o vencen hoy' }, urgentes));
+  function iniciales(n) {
+    var p = String(n || '').trim().split(/\s+/);
+    return ((p[0] || '').charAt(0) + (p[1] || '').charAt(0)).toUpperCase() || 'U';
   }
+
+  function salir() { llamar('salir').catch(function () {}).then(function () { terminarSesion('Saliste del sistema.'); }); }
+
+  // Rutas legibles en Vercel (#/oficios-salientes) para que sirva el botón Atrás.
+  var SLUG = { OFS: 'oficios-salientes', OFE: 'oficios-entrantes', OFC: 'conocimiento', CIR: 'circulares', TAR: 'tarjetas-informativas', VOL: 'volantes' };
+  function rutaDe(v, t) { return '#/' + (v === 'libreta' ? SLUG[t] : v === 'inicio' ? '' : v); }
+  function leerRuta() {
+    var r = String(location.hash || '').replace(/^#\/?/, '');
+    if (!r) return null;
+    for (var t in SLUG) if (SLUG[t] === r && E.ini.orden.indexOf(t) >= 0) return { vista: 'libreta', tipo: t };
+    if (MODULOS[r] && (['usuarios', 'bitacora', 'config'].indexOf(r) < 0 || esAdmin())) return { vista: r };
+    return null;
+  }
+  window.addEventListener('popstate', function () {
+    if (!E.ini || !principal || !usaHistorial) return;
+    var d = leerRuta() || { vista: 'inicio' };
+    irA(d.vista, d.tipo, { sinHistorial: true });
+  });
 
   var vistas = {};
-  function irA(v) {
+  function irA(v, tipo, o) {
+    o = o || {};
+    if (tipo) { if (E.tipo !== tipo) { E.filtros = { q: '', estatus: '', acuse: '' }; E.mostrar = 60; } E.tipo = tipo; }
     E.vista = v;
-    Object.keys(navBotones).forEach(function (k) { navBotones[k].classList.toggle('activo', k === v); });
+    cerrarPanel();
+    if (usaHistorial && !o.sinHistorial) {
+      try { history[o.reemplazar ? 'replaceState' : 'pushState']({}, '', rutaDe(v, E.tipo)); } catch (e) { /* sin historial */ }
+    }
     vaciar(principal);
     vistas[v]();
     window.scrollTo(0, 0);
   }
 
-  /* ───────────────────────── Registros ───────────────────────── */
+  /** Marco de cada pantalla interna: encabezado con "← Inicio". Devuelve el contenedor. */
+  function marco(clave, extra) {
+    var yo = E.ini.yo;
+    var cont = h('main', { class: 'principal' });
+    vaciar(principal).appendChild(h('div', { class: 'modulo modulo--' + (extra && extra.color || (MODULOS[clave] || {}).color || 'morado') },
+      h('header', { class: 'mcab' },
+        h('button', { class: 'mcab__volver', onclick: function () { irA('inicio'); } }, icono('atras'), h('span', null, 'Inicio')),
+        h('button', { class: 'mcab__marca', onclick: function () { irA('inicio'); }, title: 'Ir al inicio' },
+          h('img', { src: LOGO, alt: '', width: 28, height: 28 }), h('span', null, 'Control de Gestión')),
+        h('div', { class: 'mcab__yo', title: yo.nombre + ' · ' + yo.rolNombre }, h('span', { class: 'avatar' }, iniciales(yo.nombre)), h('span', { class: 'mcab__nombre' }, yo.nombre))),
+      cont));
+    return cont;
+  }
+
+  /* ───────────────────────── Portal (Inicio) ───────────────────────── */
+  vistas.inicio = function () {
+    var yo = E.ini.yo, ini = E.ini;
+    var hora = new Date().getHours();
+    var saludo = hora < 12 ? 'Buenos días' : hora < 19 ? 'Buenas tardes' : 'Buenas noches';
+    var fecha = '';
+    try { fecha = new Date().toLocaleDateString('es-MX', { weekday: 'long', day: 'numeric', month: 'long' }); } catch (e) { /* sin Intl */ }
+    var aviso = h('div');
+    var bloques = h('div');
+    principal.appendChild(h('div', { class: 'portal' },
+      h('header', { class: 'pcab' },
+        h('div', { class: 'pcab__marca' }, h('img', { class: 'pcab__logo', src: LOGO, alt: 'Territorios de Paz e Igualdad', width: 42, height: 42 }),
+          h('div', { class: 'pcab__txt' }, h('p', { class: 'pcab__org' }, 'Control de Gestión'), h('p', { class: 'pcab__sub' }, (ini.config.encabezados || []).join(' · ')))),
+        h('div', { class: 'pcab__user' },
+          h('span', { class: 'avatar' }, iniciales(yo.nombre)), h('span', { class: 'pcab__nombre' }, yo.nombre), h('span', { class: 'pcab__nivel' }, yo.rolNombre),
+          h('button', { class: 'icono-btn', title: 'Cambiar mi contraseña', 'aria-label': 'Cambiar mi contraseña', onclick: function () { pantallaCambiarClave(false); } }, icono('llave')),
+          h('button', { class: 'pcab__salir', onclick: salir }, 'Cerrar sesión'))),
+      h('main', { class: 'principal principal--portal' },
+        h('section', { class: 'hero' },
+          h('p', { class: 'hero__eyebrow' }, 'Portal institucional' + (fecha ? ' · ' + fecha : '')),
+          h('h1', { class: 'hero__t' }, saludo + ',', h('br'), yo.nombre),
+          h('p', { class: 'hero__s' }, 'Elige por dónde empezar.')),
+        aviso, bloques),
+      h('footer', { class: 'pie' }, (ini.config.encabezados || []).slice(1, 2).join('') || 'Control de Gestión')));
+    function pintar(ind) {
+      vaciar(aviso);
+      var g = ind.global;
+      if (g.vencidos || g.venceHoy) {
+        aviso.appendChild(h('button', { class: 'pav', onclick: function () { irA('pendientes'); } }, icono('alarma'),
+          h('span', { class: 'pav__txt' }, h('strong', null, (g.vencidos ? g.vencidos + (g.vencidos === 1 ? ' asunto vencido' : ' asuntos vencidos') : '') +
+            (g.vencidos && g.venceHoy ? ' y ' : '') + (g.venceHoy ? g.venceHoy + ' vence' + (g.venceHoy === 1 ? '' : 'n') + ' hoy' : '')),
+            h('small', null, 'Revisa tus pendientes para atenderlos a tiempo.')), icono('siguiente')));
+      }
+      vaciar(bloques);
+      var libretas = ini.orden.map(function (t) {
+        var d = ind.porTipo[t] || {}, chips = [d.total + ' en ' + ini.anioActual];
+        if (d.porAtender) chips.push(d.porAtender + ' por atender');
+        if (d.vencidos) chips.push(d.vencidos + (d.vencidos === 1 ? ' vencido' : ' vencidos'));
+        if (t === 'OFS' && d.sinAcuse) chips.push(d.sinAcuse + ' sin acuse');
+        return { titulo: ini.todosTipos[t].nombre, desc: DESC_TIPO[t], color: COLOR_TIPO[t], icono: ICONO_TIPO[t], chips: chips, ir: function () { irA('libreta', t); } };
+      });
+      var seguimiento = [
+        { titulo: 'Pendientes', desc: 'Lo que está por atender, por vencer y los oficios sin acuse.', color: 'guinda', icono: 'alarma',
+          chips: [g.porAtender + ' por atender'].concat(g.vencidos ? [g.vencidos + ' vencidos'] : []).concat(g.sinAcuse ? [g.sinAcuse + ' oficios sin acuse'] : []), ir: function () { irA('pendientes'); } },
+        { titulo: 'Directorio', desc: 'Las personas a quienes se dirige o que firman, escritas siempre igual.', color: 'azul', icono: 'contactos',
+          chips: [E.directorio.length + ' personas', 'Buscar'].concat(puedeCapturar() ? ['Agregar'] : []), ir: function () { irA('directorio'); } }
+      ];
+      var admin = esAdmin() ? [
+        { titulo: 'Usuarios', desc: 'Quién entra, con qué rol y a qué libretas.', color: 'guinda', icono: 'usuarios', chips: ['Dar de alta', 'Roles', 'Contraseñas'], ir: function () { irA('usuarios'); } },
+        { titulo: 'Bitácora', desc: 'Quién ha entrado y qué se ha hecho, con el antes y el después.', color: 'azul', icono: 'pulso', chips: ['Accesos', 'Cambios', 'Descargas'], ir: function () { irA('bitacora'); } },
+        { titulo: 'Configuración', desc: 'Encabezados, número oficial, plazos y dirección pública.', color: 'morado', icono: 'engrane', chips: ['Encabezados', 'Número oficial', 'Plazos'], ir: function () { irA('config'); } }
+      ] : [];
+      [['Libretas', libretas, ini.orden.length > 1 ? h('button', { class: 'bloque__accion', onclick: function () { exportarExcel(true); } }, icono('excel'), 'Excel de todas') : null],
+        ['Seguimiento', seguimiento], ['Administración', admin]].forEach(function (b) {
+        if (!b[1].length) return;
+        bloques.appendChild(h('section', { class: 'bloque' }, h('div', { class: 'bloque__cab' }, h('p', { class: 'bloque__t' }, b[0]), b[2] || null),
+          h('div', { class: 'rejilla' }, b[1].map(function (c) {
+            return h('button', { class: 'ptarjeta ptarjeta--' + c.color, onclick: c.ir },
+              h('span', { class: 'ptarjeta__fila' }, h('span', { class: 'ptarjeta__ico' }, icono(c.icono)), h('span', { class: 'ptarjeta__ir' }, icono('flecha'))),
+              h('span', { class: 'ptarjeta__t' }, c.titulo), h('span', { class: 'ptarjeta__d' }, c.desc),
+              h('span', { class: 'ptarjeta__chips' }, c.chips.map(function (x) { return h('span', { class: 'chip' }, x); })));
+          }))));
+      });
+    }
+    pintar(ini.indicadores);
+    llamar('indicadores').then(function (ind) { E.ini.indicadores = ind; if (E.vista === 'inicio') pintar(ind); }).catch(function () {});
+  };
+
+  /* ───────────────────────── Libreta (su propia pantalla) ───────────────────────── */
   var refsReg = {};
-  vistas.registros = function () {
-    var ini = E.ini;
-    var libretas = h('div', { class: 'libretas', role: 'tablist' }, ini.orden.map(function (t) {
-      return h('button', { class: 'libreta' + (t === E.tipo ? ' activa' : ''), role: 'tab', 'aria-selected': t === E.tipo ? 'true' : 'false', 'data-tipo': t,
-        onclick: function () { if (E.tipo !== t) { E.tipo = t; E.mostrar = 60; vistas.registros(); } } },
-        h('div', { class: 'libreta__n', 'data-n': t }, E.anio === ini.anioActual ? (ini.conteos[t] || 0) : '·'),
-        h('div', { class: 'libreta__t' }, ini.todosTipos[t].nombre));
-    }));
+  vistas.libreta = function () {
+    var ini = E.ini, t = E.tipo, def = ini.todosTipos[t];
+    var cont = marco('libreta', { color: COLOR_TIPO[t] });
     var q = h('input', { class: 'entrada', type: 'search', placeholder: 'Buscar por número, asunto, persona, observaciones…', value: E.filtros.q,
       'aria-label': 'Buscar', oninput: function () { E.filtros.q = q.value; E.mostrar = 60; pintarLista(); } });
-    var anio = h('select', { class: 'entrada', 'aria-label': 'Año', onchange: function () { E.anio = Number(anio.value); vistas.registros(); } },
+    var anio = h('select', { class: 'entrada', 'aria-label': 'Año', onchange: function () { E.anio = Number(anio.value); vistas.libreta(); } },
       ini.anios.map(function (a) { return h('option', { value: a, selected: a === E.anio }, 'Año ' + a); }));
     var est = h('select', { class: 'entrada', 'aria-label': 'Estatus', onchange: function () { E.filtros.estatus = est.value; E.mostrar = 60; pintarLista(); } },
-      [['', 'Todos los estatus'], ['(sin)', 'Sin estatus']].concat(ini.estatus.map(function (s) { return [s, s]; })).map(function (o) {
-        return h('option', { value: o[0], selected: o[0] === E.filtros.estatus }, o[1]);
-      }));
+      [['', 'Todos los estatus'], ['(activos)', 'Por atender (pendiente o en trámite)'], ['(vencidos)', 'Vencidos'], ['(mes)', 'De este mes'], ['(sin)', 'Sin estatus']]
+        .concat(ini.estatus.map(function (s) { return [s, s]; })).map(function (o) {
+          return h('option', { value: o[0], selected: o[0] === E.filtros.estatus }, o[1]);
+        }));
     var acu = h('select', { class: 'entrada', 'aria-label': 'Acuse', onchange: function () { E.filtros.acuse = acu.value; E.mostrar = 60; pintarLista(); } },
       [['', 'Con y sin acuse'], ['SI', 'Con acuse'], ['NO', 'Sin acuse']].map(function (o) { return h('option', { value: o[0], selected: o[0] === E.filtros.acuse }, o[1]); }));
-    var def = ini.todosTipos[E.tipo];
-    refsReg.res = h('div');
-    vaciar(principal).appendChild(h('div', null,
-      h('div', { class: 'titulo-vista' }, h('h1', null, def.nombre), h('span', { class: 'sub' }, 'Año ' + E.anio), h('div', { class: 'titulo-vista__esp' }),
-        h('button', { class: 'btn', onclick: function () { exportarExcel(false); } }, icono('excel'), 'Excel'),
-        ini.orden.length > 1 ? h('button', { class: 'btn', onclick: function () { exportarExcel(true); }, title: 'Todas tus libretas en un solo archivo, una hoja por libreta' }, icono('excel'), 'Excel de todo') : null,
-        puedeCapturar(E.tipo) ? h('button', { class: 'btn btn--prim', onclick: function () { formulario(E.tipo, null); } }, icono('mas'), 'Nuevo ' + def.singular.toLowerCase()) : null),
-      libretas,
+    refsReg = { res: h('div'), indicadores: h('div', { class: 'lib__ind' }), est: est, acu: acu, q: q };
+    cont.appendChild(h('div', null,
+      h('section', { class: 'lib' },
+        h('div', { class: 'lib__fila' },
+          h('span', { class: 'lib__ico' }, icono(ICONO_TIPO[t])),
+          h('div', { class: 'lib__txt' }, h('h1', { class: 'lib__t' }, def.nombre), h('p', { class: 'lib__d' }, DESC_TIPO[t] + ' · Año ' + E.anio)),
+          h('div', { class: 'lib__acciones' },
+            h('button', { class: 'btn btn--claro', onclick: function () { exportarExcel(false); } }, icono('excel'), 'Excel'),
+            puedeCapturar(t) ? h('button', { class: 'btn btn--blanco', onclick: function () { formulario(t, null); } }, icono('mas'), 'Nuevo ' + def.singular.toLowerCase()) : null)),
+        refsReg.indicadores),
       h('div', { class: 'herr' }, h('div', { class: 'buscador' }, icono('buscar'), q), anio, est, acu),
       refsReg.res));
+    pintarIndicadores();
     vaciar(refsReg.res).appendChild(h('div', { class: 'tarjeta vacio' }, 'Cargando…'));
     cargarLista();
   };
+
+  function mesActual() { return hoyIso().slice(0, 7); }
+  function esActivo(r) { return r.estatus === 'Pendiente' || r.estatus === 'En trámite'; }
+  function esVencido(r) { return esActivo(r) && r.fecha_limite && r.fecha_limite < hoyIso(); }
+  function esDelMes(r) { return String(r.fecha_recepcion || r.fecha || '').slice(0, 7) === mesActual(); }
+
+  /** Indicadores de la libreta (del año que se está viendo). Cada uno filtra la lista. */
+  function pintarIndicadores() {
+    var cont = refsReg.indicadores;
+    if (!cont) return;
+    var l = E.lista && E.lista.length && E.lista[0].tipo === E.tipo ? E.lista : null;
+    var n = function (f) { return l ? l.filter(f).length : '…'; };
+    var datos = [
+      ['Registros', l ? l.length : '…', function () { aplicar('', ''); }, !E.filtros.estatus && !E.filtros.acuse],
+      ['Por atender', n(esActivo), function () { aplicar('(activos)', ''); }, E.filtros.estatus === '(activos)'],
+      ['Vencidos', n(esVencido), function () { aplicar('(vencidos)', ''); }, E.filtros.estatus === '(vencidos)']
+    ];
+    if (E.tipo === 'OFS' || tieneCampo(E.tipo, 'acuse')) {
+      datos.push([E.tipo === 'OFE' ? 'Sin original' : 'Sin acuse', n(function (r) { return r.acuse !== 'SI' && r.estatus !== 'Cancelado'; }), function () { aplicar('', 'NO'); }, E.filtros.acuse === 'NO' && !E.filtros.estatus]);
+    }
+    datos.push(['De este mes', n(esDelMes), function () { aplicar('(mes)', ''); }, E.filtros.estatus === '(mes)']);
+    vaciar(cont);
+    datos.forEach(function (d) {
+      cont.appendChild(h('button', { class: 'ind' + (d[3] ? ' activo' : ''), onclick: d[2], 'aria-pressed': d[3] ? 'true' : 'false' },
+        h('span', { class: 'ind__n' }, d[1]), h('span', { class: 'ind__t' }, d[0])));
+    });
+    function aplicar(estatus, acuse) {
+      E.filtros.estatus = estatus; E.filtros.acuse = acuse; E.mostrar = 60;
+      if (refsReg.est) refsReg.est.value = estatus;
+      if (refsReg.acu) refsReg.acu.value = acuse;
+      pintarLista();
+    }
+  }
 
   function cargarLista() {
     var pedido = E.tipo + E.anio;
@@ -450,8 +601,6 @@
         r._b = norm([etiquetaNum(r), r.numero, r.asunto, r.dirigido_a, r.firma, r.obs, r.elaboro, r.carpeta, r.turnado_a, r.estatus].join(' '));
       });
       E.lista = lista;
-      var n = document.querySelector('.libreta__n[data-n="' + E.tipo + '"]');
-      if (n) n.textContent = lista.length;
       if (E.anio === E.ini.anioActual) E.ini.conteos[E.tipo] = lista.length;
       pintarLista();
     }).catch(function (e) {
@@ -464,7 +613,10 @@
     var f = E.filtros, palabras = norm(f.q).split(' ').filter(Boolean);
     return E.lista.filter(function (r) {
       if (f.estatus === '(sin)' && r.estatus) return false;
-      if (f.estatus && f.estatus !== '(sin)' && r.estatus !== f.estatus) return false;
+      if (f.estatus === '(activos)' && !esActivo(r)) return false;
+      if (f.estatus === '(vencidos)' && !esVencido(r)) return false;
+      if (f.estatus === '(mes)' && !esDelMes(r)) return false;
+      if (f.estatus && f.estatus.charAt(0) !== '(' && r.estatus !== f.estatus) return false;
       if (f.acuse && r.acuse !== f.acuse) return false;
       for (var i = 0; i < palabras.length; i++) if (r._b.indexOf(palabras[i]) < 0) return false;
       return true;
@@ -476,6 +628,7 @@
 
   function pintarLista() {
     if (!refsReg.res) return;
+    pintarIndicadores();
     var t = E.tipo, filas = filtrada(), vis = filas.slice(0, E.mostrar);
     var cp = columnaPersona(t), cf = columnaFecha(t);
     var numEt = t === 'OFS' ? 'No. de oficio' : etiquetaCampo(t, 'numero', 'Número');
@@ -649,7 +802,7 @@
     }).catch(fallo);
   }
 
-  function cargarListaSiAplica(t) { if (E.vista === 'registros' && E.tipo === t) cargarLista(); }
+  function cargarListaSiAplica(t) { if (E.vista === 'libreta' && E.tipo === t) cargarLista(); }
 
   function cancelarRegistro(r) {
     var motivo = h('textarea', { class: 'entrada', rows: 3, maxlength: 500, placeholder: 'Ej.: se capturó dos veces; el oficio no se envió…' });
@@ -914,8 +1067,8 @@
           if (res.sinCambios) aviso('No había cambios que guardar.');
           else aviso((nuevo ? 'Registrado: ' : 'Guardado: ') + def.singular + ' ' + etiquetaNum(r) + (r.numero && def.numeroAuto ? ' · ' + r.numero : ''), 'ok');
           if (nuevo && E.anio === E.ini.anioActual) E.ini.conteos[t] = (E.ini.conteos[t] || 0) + 1;
-          if (E.vista === 'registros') cargarLista();
-          else if (E.vista === 'pendientes') vistas.pendientes();
+          if (E.vista === 'libreta') cargarLista();
+          else if (E.vista === 'pendientes') irA('pendientes', null, { sinHistorial: true });
           abrirDetalle(r.id);
         });
       }).catch(function (e) {
@@ -985,10 +1138,9 @@
   /* ───────────────────────── Pendientes ───────────────────────── */
   vistas.pendientes = function () {
     var cont = h('div', { class: 'pend' }, h('div', { class: 'tarjeta vacio' }, 'Cargando…'));
-    vaciar(principal).appendChild(h('div', null, h('div', { class: 'titulo-vista' }, h('h1', null, 'Pendientes'),
+    marco('pendientes').appendChild(h('div', null, h('div', { class: 'titulo-vista' }, h('h1', null, 'Pendientes'),
       h('span', { class: 'sub' }, 'Lo que está por atender y los oficios que salieron sin acuse')), cont));
     llamar('pendientes').then(function (p) {
-      pintarInsigniaPendientes(p);
       vaciar(cont);
       function item(r, conPersona) {
         var per = lineas(r.tipo === 'OFS' ? r.dirigido_a : r.firma).primera;
@@ -1013,7 +1165,7 @@
     var lista = h('div', { class: 'tarjeta lista-simple' }, h('div', { class: 'vacio' }, 'Cargando…'));
     var conteo = h('p', { class: 'conteo' });
     var datos = [];
-    vaciar(principal).appendChild(h('div', null,
+    marco('directorio').appendChild(h('div', null,
       h('div', { class: 'titulo-vista' }, h('h1', null, 'Directorio'), h('span', { class: 'sub' }, 'Personas a quienes se dirige o que firman'), h('div', { class: 'titulo-vista__esp' }),
         puedeCapturar() ? h('button', { class: 'btn btn--prim', onclick: function () { modalPersona({}).then(function (p) { if (p) cargar(); }); } }, icono('mas'), 'Agregar persona') : null),
       h('div', { class: 'herr' }, h('div', { class: 'buscador' }, icono('buscar'), q)), conteo, lista));
@@ -1061,7 +1213,7 @@
   /* ───────────────────────── Usuarios ───────────────────────── */
   vistas.usuarios = function () {
     var cont = h('div', { class: 'tarjeta' }, h('div', { class: 'vacio' }, 'Cargando…'));
-    vaciar(principal).appendChild(h('div', null,
+    marco('usuarios').appendChild(h('div', null,
       h('div', { class: 'titulo-vista' }, h('h1', null, 'Usuarios'), h('span', { class: 'sub' }, 'Quién entra y qué puede hacer'), h('div', { class: 'titulo-vista__esp' }),
         h('button', { class: 'btn btn--prim', onclick: function () { modalUsuario(null); } }, icono('mas'), 'Nuevo usuario')), cont));
     function libretasTxt(tipos) {
@@ -1149,7 +1301,7 @@
     var cont = h('div', { class: 'tarjeta' }, h('div', { class: 'vacio' }, 'Cargando…'));
     var conteo = h('p', { class: 'conteo' });
     var primera = true, espera = null;
-    vaciar(principal).appendChild(h('div', null, h('div', { class: 'titulo-vista' }, h('h1', null, 'Bitácora'), h('span', { class: 'sub' }, 'Todo lo que se hace en el sistema queda aquí y no se puede borrar desde la app')),
+    marco('bitacora').appendChild(h('div', null, h('div', { class: 'titulo-vista' }, h('h1', null, 'Bitácora'), h('span', { class: 'sub' }, 'Todo lo que se hace en el sistema queda aquí y no se puede borrar desde la app')),
       h('div', { class: 'herr' }, f.desde, f.hasta, f.usuario, f.accion, h('div', { class: 'buscador' }, icono('buscar'), f.texto)), conteo, cont));
     function cargar() {
       llamar('bitacora', { desde: f.desde.value, hasta: f.hasta.value, usuario: f.usuario.value, accion: f.accion.value, texto: f.texto.value }).then(function (r) {
@@ -1184,7 +1336,7 @@
     var web = h('input', { class: 'entrada', type: 'url', value: c.url_web || '', maxlength: 200, placeholder: 'https://control-gestion.vercel.app' });
     function pintarEj() { ej.textContent = pl.value ? 'Ejemplo: ' + pl.value.replace('{NNN}', '417').replace('{AAAA}', E.ini.anioActual) : 'Sin plantilla: los oficios salientes solo tendrán consecutivo.'; }
     pl.addEventListener('input', pintarEj); pintarEj();
-    vaciar(principal).appendChild(h('div', null, h('div', { class: 'titulo-vista' }, h('h1', null, 'Configuración')),
+    marco('config').appendChild(h('div', null, h('div', { class: 'titulo-vista' }, h('h1', null, 'Configuración')),
       h('div', { class: 'tarjeta config' },
         campo('Encabezado · línea 1', e1), campo('Encabezado · línea 2', e2), campo('Encabezado · línea 3', e3, { ayuda: 'Salen en la pantalla de entrada y arriba de cada Excel.' }),
         h('div', null, campo('Número oficial de los oficios salientes', pl, { ayuda: '{NNN} es el consecutivo (001, 002…) y {AAAA} el año.' }), ej),
