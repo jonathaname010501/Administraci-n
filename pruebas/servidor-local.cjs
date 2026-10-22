@@ -26,6 +26,12 @@ e.cargarBase(JSON.parse(fs.readFileSync(path.join(__dirname, "..", "base", "base
 const salida = e.comoDueno("instalar");
 const m = salida.match(/Usuario: (\S+)\s+Contraseña temporal: (\S+)/);
 e.comoAnonimo();
+if (process.env.CG_SIMULAR_VIEJO === "1") {
+  // Prueba: la página nueva contra un servidor publicado de una versión anterior.
+  const inicioReal = e.ctx.ACCIONES_.inicio.fn;
+  e.ctx.ACCIONES_.inicio.fn = (yo, d, t) => { const r = inicioReal(yo, d, t); delete r.indicadores; r.version = "1.0.0"; return r; };
+  delete e.ctx.ACCIONES_.indicadores;
+}
 e.estado.url = `http://localhost:${PUERTO}/`;
 
 const FUENTES = path.join(__dirname, "fuentes");

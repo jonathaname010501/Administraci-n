@@ -12,6 +12,10 @@
 (function () {
   'use strict';
 
+  // Versión de esta página. Debe coincidir con VERSION de Servidor.gs: si la
+  // página (Vercel) se actualiza y el servidor (Apps Script) no, se avisa.
+  var VERSION_APP = '1.2.0';
+
   /* ───────────────────────── Utilidades ───────────────────────── */
   var ICONOS = {
     mas: '<path d="M12 5v14M5 12h14"/>',
@@ -389,6 +393,24 @@
   };
   var usaHistorial = !(window.google && google.script);
 
+  // Instalar como app (Chrome/Edge en Android y computadora; en iPhone es
+  // Compartir → Agregar a inicio). Solo en la versión publicada en Vercel.
+  var promptInstalar = null;
+  window.addEventListener('beforeinstallprompt', function (ev) {
+    ev.preventDefault();
+    promptInstalar = ev;
+    if (E.ini && E.vista === 'inicio') irA('inicio', null, { sinHistorial: true });
+  });
+  window.addEventListener('appinstalled', function () {
+    promptInstalar = null;
+    aviso('Listo: «Control de Gestión» quedó instalada como app.', 'ok');
+  });
+  function instalarApp() {
+    if (!promptInstalar) return;
+    promptInstalar.prompt();
+    promptInstalar.userChoice.then(function () { promptInstalar = null; if (E.vista === 'inicio') irA('inicio', null, { sinHistorial: true }); }, function () {});
+  }
+
   function cargarInicio() {
     return llamar('inicio').then(function (ini) {
       E.ini = ini;
@@ -473,6 +495,7 @@
         h('div', { class: 'pcab__marca' }, h('img', { class: 'pcab__logo', src: LOGO, alt: 'Territorios de Paz e Igualdad', width: 42, height: 42 }),
           h('div', { class: 'pcab__txt' }, h('p', { class: 'pcab__org' }, 'Control de Gestión'), h('p', { class: 'pcab__sub' }, (ini.config.encabezados || []).join(' · ')))),
         h('div', { class: 'pcab__user' },
+          promptInstalar ? h('button', { class: 'pcab__instalar', onclick: instalarApp, title: 'Instalar Control de Gestión como app' }, icono('bajar'), 'Instalar app') : null,
           h('span', { class: 'avatar' }, iniciales(yo.nombre)), h('span', { class: 'pcab__nombre' }, yo.nombre), h('span', { class: 'pcab__nivel' }, yo.rolNombre),
           h('button', { class: 'icono-btn', title: 'Cambiar mi contraseña', 'aria-label': 'Cambiar mi contraseña', onclick: function () { pantallaCambiarClave(false); } }, icono('llave')),
           h('button', { class: 'pcab__salir', onclick: salir }, 'Cerrar sesión'))),
@@ -485,6 +508,13 @@
       h('footer', { class: 'pie' }, (ini.config.encabezados || []).slice(1, 2).join('') || 'Control de Gestión')));
     function pintar(ind) {
       vaciar(aviso);
+      if (E.ini.version !== VERSION_APP && esAdmin()) {
+        aviso.appendChild(h('div', { class: 'alerta alerta--aviso', style: { marginBottom: '20px' } },
+          h('strong', null, 'Falta publicar el servidor. '),
+          'La página es la versión ' + VERSION_APP + ' y el servidor de Apps Script la ' + (E.ini.version || 'anterior') +
+          '. En el editor de Apps Script pega los archivos nuevos y ve a Implementar → Gestionar implementaciones → ✏ → Nueva versión.'));
+      }
+      ind = ind && ind.porTipo ? ind : { porTipo: {}, global: { porAtender: 0, vencidos: 0, venceHoy: 0, sinAcuse: 0 } };
       var g = ind.global;
       if (g.vencidos || g.venceHoy) {
         aviso.appendChild(h('button', { class: 'pav', onclick: function () { irA('pendientes'); } }, icono('alarma'),
@@ -494,7 +524,7 @@
       }
       vaciar(bloques);
       var libretas = ini.orden.map(function (t) {
-        var d = ind.porTipo[t] || {}, chips = [d.total + ' en ' + ini.anioActual];
+        var d = ind.porTipo[t] || {}, chips = d.total === undefined ? [] : [d.total + ' en ' + ini.anioActual];
         if (d.porAtender) chips.push(d.porAtender + ' por atender');
         if (d.vencidos) chips.push(d.vencidos + (d.vencidos === 1 ? ' vencido' : ' vencidos'));
         if (t === 'OFS' && d.sinAcuse) chips.push(d.sinAcuse + ' sin acuse');
@@ -502,7 +532,7 @@
       });
       var seguimiento = [
         { titulo: 'Pendientes', desc: 'Lo que está por atender, por vencer y los oficios sin acuse.', color: 'guinda', icono: 'alarma',
-          chips: [g.porAtender + ' por atender'].concat(g.vencidos ? [g.vencidos + ' vencidos'] : []).concat(g.sinAcuse ? [g.sinAcuse + ' oficios sin acuse'] : []), ir: function () { irA('pendientes'); } },
+          chips: (ind.porTipo && Object.keys(ind.porTipo).length ? [g.porAtender + ' por atender'] : ['Por atender']).concat(g.vencidos ? [g.vencidos + ' vencidos'] : []).concat(g.sinAcuse ? [g.sinAcuse + ' oficios sin acuse'] : []), ir: function () { irA('pendientes'); } },
         { titulo: 'Directorio', desc: 'Las personas a quienes se dirige o que firman, escritas siempre igual.', color: 'azul', icono: 'contactos',
           chips: [E.directorio.length + ' personas', 'Buscar'].concat(puedeCapturar() ? ['Agregar'] : []), ir: function () { irA('directorio'); } }
       ];

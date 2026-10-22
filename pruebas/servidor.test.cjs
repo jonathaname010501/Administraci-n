@@ -447,6 +447,14 @@ test("armar-web: arma dist/ para Vercel sin código en línea y exige la URL del
   assert.match(csp, /script-src 'self';/);
   assert.match(csp, /connect-src https:\/\/script\.google\.com https:\/\/script\.googleusercontent\.com;/);
   assert.match(csp, /frame-ancestors 'none'/);
+  assert.match(csp, /manifest-src 'self'/);
+  const man = JSON.parse(fs.readFileSync(path.join(raiz, "dist", "manifest.webmanifest"), "utf8"));
+  assert.equal(man.name, "Control de Gestión");
+  assert.deepEqual(man.icons.map((i) => i.sizes), ["192x192", "512x512", "512x512"]);
+  for (const i of man.icons) assert.ok(fs.existsSync(path.join(raiz, "dist", i.src)), i.src);
+  assert.match(html, /<title>Control de Gestión<\/title>/);
+  assert.match(html, /rel="apple-touch-icon" href="icono-180\.png/);
+  assert.match(html, /rel="manifest" href="manifest\.webmanifest/);
 });
 
 testBase("indicadores del portal: por libreta y solo de las libretas propias", () => {
@@ -465,4 +473,10 @@ testBase("indicadores del portal: por libreta y solo de las libretas propias", (
   assert.deepEqual(Object.keys(suyo.porTipo), ["CIR"], "no ve números de otras libretas");
   assert.equal(suyo.global.sinAcuse, 0);
   assert.ok(e.api(cap, "inicio").datos.indicadores.porTipo.CIR.total >= 77);
+});
+
+test("la versión de la página y la del servidor coinciden", () => {
+  const app = fs.readFileSync(path.join(__dirname, "..", "apps-script", "App.html"), "utf8").match(/var VERSION_APP = '([^']+)'/)[1];
+  const srv = fs.readFileSync(path.join(__dirname, "..", "apps-script", "Servidor.gs"), "utf8").match(/var VERSION = '([^']+)'/)[1];
+  assert.equal(app, srv, "sube las dos juntas");
 });

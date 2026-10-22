@@ -18,7 +18,7 @@ const vercel = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "vercel.jso
 const encabezados = Object.fromEntries(vercel.headers[0].headers.map((h) => [h.key, h.value]));
 encabezados["Content-Security-Policy"] = encabezados["Content-Security-Policy"].replace(/connect-src [^;]+/, "connect-src " + API);
 delete encabezados["Strict-Transport-Security"];
-const TIPOS = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".svg": "image/svg+xml" };
+const TIPOS = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".svg": "image/svg+xml", ".png": "image/png", ".webmanifest": "application/manifest+json" };
 
 http.createServer((req, res) => {
   const ruta = decodeURIComponent(req.url.split("?")[0]);

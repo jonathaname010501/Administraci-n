@@ -21,7 +21,7 @@
  * ════════════════════════════════════════════════════════════════════════
  */
 
-var VERSION = '1.0.0';
+var VERSION = '1.2.0';   // súbela junto con VERSION_APP (App.html) en cada cambio
 var ZONA = 'America/Mexico_City';
 var ITERACIONES_CLAVE = 1000;      // PBKDF2-HMAC-SHA256
 var MAX_INTENTOS = 5;              // contraseñas fallidas antes de bloquear
@@ -87,11 +87,13 @@ function doGet() {
   var web = '';
   try { web = config_().url_web || ''; } catch (e) { /* aún sin instalar */ }
   if (web) {
-    return HtmlService.createHtmlOutput('<!DOCTYPE html><html><head><meta charset="utf-8"><base target="_top"></head>' +
+    var enlace = HtmlService.createHtmlOutput('<!DOCTYPE html><html><head><meta charset="utf-8"><base target="_top"></head>' +
       '<body style="font-family:system-ui,sans-serif;display:grid;place-content:center;min-height:90vh;text-align:center;color:#55585a">' +
       '<h2 style="color:#8f4889">Control de Gestión</h2><p>El sistema está en esta dirección:</p>' +
       '<p><a style="font-size:18px;color:#8f4889" href="' + escHtml_(web) + '">' + escHtml_(web) + '</a></p></body></html>')
       .setTitle('Control de Gestión');
+    try { enlace.setFaviconUrl(web.replace(/\/+$/, '') + '/icono-32.png'); } catch (e) { /* sin ícono */ }
+    return enlace;
   }
   // La página se arma pegando los archivos HTML del proyecto. Ojo: Google
   // quita los comentarios <!-- --> de los archivos, así que no se usan como
