@@ -40,140 +40,6 @@ Igual que Gabinetes:
 - **En Vercel funciona el botón Atrás** del navegador, y cada pantalla tiene su
   dirección (por ejemplo `#/oficios-entrantes`).
 
-## Varios destinatarios (oficios salientes)
-
-En **Nuevo oficio saliente** está el interruptor **«Varios destinatarios»**: se eligen
-las personas del directorio (quedan como fichas, cada una con su ✕) y se escriben una
-sola vez el asunto, la firma, la fecha y quién elaboró.
-
-- Antes de guardar se ve la lista exacta: *«Se crearán 28 oficios: del
-  SAPCI/STPI/417/2026 al SAPCI/STPI/444/2026»*, con el número que le toca a cada persona.
-- Los números salen **seguidos** aunque otra persona esté guardando al mismo tiempo:
-  el servidor los asigna todos dentro de un solo candado y los escribe de una vez.
-- Si alguien registra un oficio mientras confirmas, el sistema **no guarda** y te
-  muestra los números nuevos para que vuelvas a confirmar.
-- Hasta **100** destinatarios por vez. Cada oficio queda en la Bitácora, más un resumen.
-- Los escaneos y acuses se suben después, en cada oficio.
-
-## Mis asuntos (turnar a personas del sistema)
-
-En **Seguimiento** de cualquier registro hay dos campos:
-
-- **Turnar a una persona del sistema**: solo aparecen usuarios **activos** que tienen
-  acceso a esa libreta. Si el registro no tenía estatus, se pone «Pendiente».
-- **Turnado a** (texto libre): para áreas o personas externas, como antes.
-
-Quien recibe el turno lo ve en la tarjeta **«Mis asuntos»** del portal (por atender,
-vencidos y lo que vence hoy) y en su pantalla, separado en *Vencidos*, *Vencen hoy*,
-*Por atender* y *Atendidos*. En cada libreta hay además el filtro **«Turnados a mí»**.
-Cada turno, cambio o retiro queda en la Bitácora y en el historial del registro.
-
-Nadie ve asuntos de libretas que no tiene, aunque se los hayan turnado: si a alguien
-le quitan una libreta, sus turnos de esa libreta dejan de aparecerle.
-
-## Buscador general
-
-Arriba de las tarjetas del portal hay una caja **«Buscar en todas mis libretas»**: busca
-a la vez en número, número oficial, asunto, personas (dirigido a, firma o remitente),
-observaciones, turnado a, área, elaboró y carpeta, **en todos los años**. No importan
-acentos ni mayúsculas. Muestra hasta 50 resultados (los más recientes), agrupados por
-libreta; cada uno abre su detalle. Si hay más, «Ver en la libreta» abre la libreta con
-la búsqueda ya escrita. Solo busca en las libretas que tiene cada quien.
-
-## Duplicar
-
-En el detalle de un registro, **«Duplicar»** abre el formulario de alta con los mismos
-datos (asunto, personas, área, elaboró, carpeta, observaciones, turnado a). **No** copia:
-número, archivos, estatus, cancelación, historial, acuse, relación ni fechas (el nuevo
-lleva las suyas). En la Bitácora queda «(copia de 145/2026)».
-
-## Fotos con la cámara del celular
-
-En **Documento** y **Acuse** (en el detalle y al dar de alta) hay, además de «Subir», un
-botón **«Tomar foto»** que abre la cámara trasera del celular (en computadora abre el
-selector de imágenes). La foto se reduce **en el teléfono** antes de subirla: lado mayor
-de 2000 px y JPEG al 80 % (una foto de 8 MB queda en ~0.5 MB). Si alguien sube una
-imagen de más de 10 MB con «Subir», también se reduce en vez de rechazarse.
-
-No hizo falta cambiar `vercel.json`: «Tomar foto» usa el selector de archivos del
-teléfono (`capture`), no la cámara del navegador, así que `Permissions-Policy: camera=()`
-y la CSP siguen igual de estrictas.
-
-## Modo mantenimiento
-
-En **Configuración → Modo mantenimiento** el administrador lo prende con un mensaje.
-Mientras está prendido:
-
-- Solo los administradores pueden entrar y trabajar.
-- La pantalla de entrada muestra el mensaje a todos.
-- A quien ya estaba dentro, la página lo saca con el aviso: en cuanto hace algo, o
-  sola en unos minutos (la página pregunta cada 5 min y al volver a la pestaña; esa
-  pregunta **no** alarga la sesión).
-- Prenderlo, apagarlo o cambiar el mensaje queda en la Bitácora.
-
-## Volante de recepción (imprimible)
-
-En el detalle de todo lo que se **recibe** (entrantes, conocimiento, circulares,
-tarjetas y volantes) está **«Imprimir volante»**: una hoja **media carta** (14 × 21.6 cm)
-con el encabezado institucional y el logo, número de control y número del oficio,
-fecha y hora de recepción, remitente, dirigido a, asunto, turnado a, fecha límite,
-quién recibió y observaciones, y espacios para **firma** y **sello**. Primero se ve una
-vista previa y luego «Imprimir» abre el cuadro de impresión del navegador.
-
-- La hora sale sola si el registro se capturó en el sistema el mismo día que se
-  recibió; si no, queda la raya para escribirla a mano (igual con lo que falte).
-- Funciona dentro de Google y en Vercel; en la impresora conviene «Tamaño real» o
-  «100 %». No necesita el servidor nuevo: se arma en la página.
-
-## Informes
-
-Tarjeta y pantalla **«Informes»** para los administradores y para quien el
-administrador marque en **Usuarios → Editar → «Puede ver Informes»** (columna nueva
-`informes` en la pestaña *Usuarios*). Cada quien ve solo sus libretas.
-
-- **Filtros** arriba: periodo (este año, últimos 12 meses, este mes, año pasado u otro)
-  y libretas.
-- **Indicadores**: registros del periodo, respondidos con oficio, tiempo promedio de
-  respuesta y porcentaje atendido a tiempo.
-- **Registros por mes** (todas las libretas elegidas) y **una gráfica chica por
-  libreta**, cada una con su color y su escala. Al pasar el mouse o tocar una columna
-  aparece el detalle; debajo hay «Ver los datos en tabla».
-- **Principales remitentes** (lo que se recibe) y **destinatarios** (oficios salientes),
-  los 10 primeros; las personas del directorio se cuentan por ficha, aunque se hayan
-  escrito distinto.
-- **Tiempo de respuesta**: del día en que se recibió algo al oficio saliente que lo
-  contestó con «Responder con oficio», en **días hábiles** (lunes a viernes; no
-  descuenta días festivos). Promedio, mediana, el más tardado y cuántos en cada rango.
-- **Atendido a tiempo**: de los asuntos cuya fecha límite cae en el periodo, cuántos
-  pasaron a «Atendido» o «Concluido» a más tardar ese día, cuántos fuera de plazo y
-  cuántos siguen abiertos con la fecha vencida. Los que aún están en plazo no cuentan.
-- **Excel** con Resumen, Por mes, Remitentes, Destinatarios, Tiempo de respuesta (cada
-  caso) y A tiempo (cada asunto, con de dónde salió su fecha). Queda en la Bitácora.
-- No cuenta registros cancelados. La fecha de cada registro es la de recepción (o la
-  del documento si no tiene).
-
-**¿De dónde sale la fecha de atención?** Desde la 1.5.0 hay una columna nueva al final
-de *Registros*, `fecha_atencion`, que el servidor llena solo el día en que un registro
-**pasa** a Atendido o Concluido (y la borra si se reabre). Se eligió una columna y no
-solo la Bitácora porque es exacta, rápida y no depende de leer miles de movimientos.
-Para lo que se atendió **antes** de esta versión se usa, en este orden: el último cambio
-a Atendido/Concluido que quedó en la Bitácora; si no hay, la fecha del oficio que lo
-respondió; si nació ya atendido en la app, el día en que se capturó. Si no hay ninguno,
-se reporta aparte como «sin fecha de atención» y no entra al porcentaje.
-
-Las gráficas son SVG hechas a mano (sin librerías) y se dibujan al ancho real de la
-pantalla, así que se leen igual en el celular. Los colores de estado (verde, ámbar,
-rojo) se revisaron para que se distingan con daltonismo y siempre llevan ícono,
-nombre y número.
-
-## Respaldo descargable
-
-En **Configuración → Respaldo completo**, el administrador descarga un Excel con una hoja
-por pestaña: Registros, Directorio, Usuarios (**sin** contraseñas ni sellos de sesión),
-Bitácora y Configuración. Tampoco lleva los IDs internos de Drive (los escaneos están en
-la carpeta «Archivos»). Queda en la Bitácora. Es adicional a la copia automática de cada
-lunes en la carpeta «Respaldos».
-
 ## Las libretas
 
 Las mismas seis hojas del minutario, con sus columnas:
@@ -195,13 +61,6 @@ con) y **Archivos** (documento escaneado y acuse: PDF, JPG o PNG hasta 10 MB).
 | Ver y buscar en sus libretas | ✔ | ✔ | ✔ |
 | Abrir escaneos y descargar Excel | ✔ | ✔ | ✔ |
 | Registrar y editar | ✔ | ✔ | — |
-| Varios destinatarios y turnar a una persona del sistema | ✔ | ✔ | — |
-| Ver «Mis asuntos» (lo que le turnaron) | ✔ | ✔ | ✔ |
-| Buscador general (en sus libretas) | ✔ | ✔ | ✔ |
-| Duplicar un registro, tomar foto con el celular | ✔ | ✔ | — |
-| Modo mantenimiento, respaldo completo en Excel | ✔ | — | — |
-| Imprimir volante de recepción | ✔ | ✔ | ✔ |
-| Informes (gráficas y Excel de sus libretas) | ✔ | si se le da permiso | si se le da permiso |
 | Subir o quitar escaneos | ✔ | ✔ | — |
 | Agregar personas al directorio | ✔ | ✔ | — |
 | Cancelar un registro | ✔ | — | — |
@@ -262,7 +121,7 @@ tipografías de Google Fonts.
 ## Límites (sobran para este volumen)
 
 - Unos **750 registros al año**. Google Sheets admite 10 millones de celdas; cada
-  registro usa 35. Hay espacio para décadas.
+  registro usa 33. Hay espacio para décadas.
 - Escaneos: hasta **10 MB** cada uno. El Drive gratuito tiene 15 GB, compartidos con
   el Gmail de esa cuenta: unos 40,000 escaneos de 300 KB.
 - Apps Script: cada acción tarda de 1 a 2 segundos y la primera carga del día, unos
@@ -296,7 +155,6 @@ apps-script/      El código de la app (lo que va al editor de Apps Script)
   appsscript.json   zona horaria y configuración de la app web
 base/             La base inicial (Excel) y el resumen de la migración  (NO va a GitHub)
 herramientas/     migrar_minutario.py · armar-web.mjs (arma dist/ para Vercel)
-                  publicar.mjs (npm run publicar: pruebas, clasp, implementación y git)
 vercel.json       Cómo publica Vercel y los encabezados de seguridad
 .clasp.json.ejemplo  Para subir el servidor con clasp (ver INSTALAR.md, Parte C)
 pruebas/          Simulador de Apps Script en Node + pruebas
@@ -318,23 +176,14 @@ corre en Vercel (`doPost` en Servidor.gs). Las dos rutas pasan por la misma `api
 3. En `App.html`, la interfaz se arma con `h()`, que pone el texto como texto. No
    uses `innerHTML` con datos.
 4. Si agregas una columna, agrégala **al final** en `COLS` (Servidor.gs) y en el script
-   de migración, y corre `instalar()` para que la agregue a la hoja. (Si se olvida,
-   `tabla_()` agrega sola los encabezados que falten al final y lo anota en la
-   Bitácora, para que la app no se detenga; pero `instalar()` sigue siendo el paso
-   oficial.) `npm run publicar` avisa cuando una versión trae columnas nuevas.
-5. Lo nuevo de la página revisa con `tiene('accion')` que el servidor publicado ya
-   tenga esa acción (`inicio` devuelve la lista). Así, si la página se actualiza antes
-   que el servidor, lo nuevo no aparece en vez de tronar.
-6. Al editar, un campo nuevo que una página vieja no manda (`undefined`) se conserva:
-   nunca se borra un dato porque la página no lo conocía.
+   de migración, y corre `instalar()` para que la agregue a la hoja.
 
 **Pruebas** (necesitas Node 20 o más; Python 3 con openpyxl para la del Excel):
 
 ```bash
-npm test               # 63 pruebas: seguridad, permisos, consecutivos, varios destinatarios, turnos, buscador, mantenimiento, respaldo, informes, publicar, Excel…
+npm test               # 34 pruebas: seguridad, permisos, consecutivos, archivos, Excel, armado web…
 npm run local          # la app en http://localhost:4321 con la base migrada
 npm run web            # arma dist/ (necesita CG_API_URL)
-npm run publicar -- "mensaje"   # publica servidor y página (INSTALAR.md, Parte C)
 ```
 
 El simulador (`pruebas/simulador.cjs`) imita Sheets, Drive, caché, candado y

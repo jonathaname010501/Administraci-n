@@ -59,10 +59,10 @@ test("doGet arma la página completa con estilos, Excel y app (aunque Google qui
   const e = crearEntorno();
   const html = e.run("doGet").html;
   assert.match(html, /^<!DOCTYPE html><html lang="es"><head>/);
-  assert.match(html, /<style>[\s\S]*--morado: #8f4889[\s\S]*<\/style>\s*<\/head><body>/, "estilos dentro del head");
+  assert.match(html, /<style>[\s\S]*--color-morado: #8f4889[\s\S]*<\/style>\s*<\/head><body>/, "estilos dentro del head");
   assert.match(html, /<div id="app" class="app">/);
   assert.match(html, /<script>[\s\S]*var ExcelCG = [\s\S]*<\/script>/);
-  assert.match(html, /<script>[\s\S]*function llamar\(accion, datos(, o)?\)[\s\S]*<\/script>\s*<\/body><\/html>$/);
+  assert.match(html, /<script>[\s\S]*function llamar\(accion, datos\)[\s\S]*<\/script>\s*<\/body><\/html>$/);
   assert.equal((html.match(/<script>/g) || []).length, 2, "solo los dos bloques de código");
 });
 
@@ -175,7 +175,7 @@ testBase("permisos por rol y por libreta", () => {
   assert.equal(e.api(cap, "descargarArchivo", { id: "m-ofs-2026-001", clase: "oficio" }).codigo, "PERMISO");
   assert.equal(e.api(con, "guardar", { ...nuevoOficio(), tipo: "OFE" }).codigo, "PERMISO", "consulta no captura");
   assert.equal(e.api(con, "listar", { tipo: "OFS", anio: 2026 }).datos.length, 416);
-  for (const [acc, d] of [["usuarios"], ["bitacora"], ["guardarConfig", {}], ["cancelar", { id: "m-ofs-2026-001", motivo: "prueba de permisos" }], ["unirPersonas", { de: "P0001", a: "P0002" }], ["restablecerClave", { usuario: "admin" }]]) {
+  for (const [acc, d] of [["usuarios"], ["bitacora"], ["guardarConfig", {}], ["exportar", { tipo: "OFE", anio: 2026 }], ["exportar", { tipo: "TODOS", soloConteo: true }], ["cancelar", { id: "m-ofs-2026-001", motivo: "prueba de permisos" }], ["unirPersonas", { de: "P0001", a: "P0002" }], ["restablecerClave", { usuario: "admin" }]]) {
     assert.equal(e.api(cap, acc, d).codigo, "PERMISO", acc);
     assert.equal(e.api(con, acc, d).codigo, "PERMISO", acc);
   }
@@ -479,4 +479,26 @@ test("la versión de la página y la del servidor coinciden", () => {
   const app = fs.readFileSync(path.join(__dirname, "..", "apps-script", "App.html"), "utf8").match(/var VERSION_APP = '([^']+)'/)[1];
   const srv = fs.readFileSync(path.join(__dirname, "..", "apps-script", "Servidor.gs"), "utf8").match(/var VERSION = '([^']+)'/)[1];
   assert.equal(app, srv, "sube las dos juntas");
+});
+
+testBase("exportación: solo admin, por libreta y por rango de fechas", () => {
+  const e = preparar();
+  const cap = alta(e, "beto", "captura", "*");
+  assert.equal(e.api(cap, "exportar", { tipo: "TODOS", desde: "2026-01-01", hasta: "2026-12-31" }).codigo, "PERMISO");
+  const todo = e.api(e.admin, "exportar", { tipo: "TODOS", soloConteo: true }).datos;
+  assert.equal(todo.total, 732);
+  assert.equal(todo.porTipo.OFS, 416);
+  const ene = e.api(e.admin, "exportar", { tipo: "OFS", desde: "2026-01-01", hasta: "2026-01-31", soloConteo: true }).datos;
+  assert.ok(ene.total > 0 && ene.total < 416);
+  assert.ok(ene.sinFecha > 0, "los apartados sin fecha no entran en un rango");
+  const conDatos = e.api(e.admin, "exportar", { tipo: "OFS", desde: "2026-01-01", hasta: "2026-01-31" }).datos;
+  assert.equal(conDatos.filas.length, ene.total);
+  assert.ok(conDatos.filas.every((r) => r.fecha >= "2026-01-01" && r.fecha <= "2026-01-31"));
+  assert.ok(conDatos.filas.every((r) => !("archivo_id" in r)), "no salen IDs de Drive");
+  const entr = e.api(e.admin, "exportar", { tipo: "OFE", desde: "2026-06-01", hasta: "2026-06-30" }).datos.filas;
+  assert.ok(entr.every((r) => (r.fecha_recepcion || r.fecha) >= "2026-06-01" && (r.fecha_recepcion || r.fecha) <= "2026-06-30"), "en entrantes cuenta la fecha de recibido");
+  assert.equal(e.api(e.admin, "exportar", { tipo: "TODOS", desde: "2026-05-01", hasta: "2026-04-01" }).codigo, "DATOS");
+  assert.equal(e.api(e.admin, "exportar", { tipo: "TODOS", desde: "2026-13-01" }).codigo, "DATOS");
+  const bit = e.api(e.admin, "bitacora", { accion: "exportación" }).datos.filas;
+  assert.match(bit[0].detalle, /del 2026-06-01 al 2026-06-30/);
 });

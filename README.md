@@ -10,6 +10,5 @@ informativas y volantes de turno) que sustituye al Excel "Minutario".
 |---|---|
 | [INSTALAR.md](INSTALAR.md) | Instalación paso a paso (Google, GitHub, Vercel) y cómo publicar cambios |
 | [LEEME.md](LEEME.md) | Qué hace, roles, seguridad, límites y reglas para modificarlo |
-| [CAMBIOS.md](CAMBIOS.md) | Qué trae cada versión y qué hacer al publicarla |
 
 > Los datos reales (`base/`, capturas, Excel) **no** están en este repositorio a propósito.

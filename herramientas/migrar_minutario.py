@@ -53,17 +53,11 @@ COLS = {
                   "relacionado_id", "archivo_id", "archivo_nombre",
                   "acuse_archivo_id", "acuse_archivo_nombre", "motivo_cancelacion",
                   "creado_por", "creado_en", "modificado_por", "modificado_en",
-                  "version", "origen",
-                  # 1.3.0 · columnas nuevas: SIEMPRE al final (igual que en Servidor.gs)
-                  "turnado_usuario",
-                  # 1.5.0
-                  "fecha_atencion"],
+                  "version", "origen"],
     "Directorio": ["id", "nombre", "cargo", "dependencia", "activo", "unido_a",
                    "creado_por", "creado_en", "modificado_en"],
     "Usuarios": ["usuario", "nombre", "rol", "tipos", "activo", "clave", "debe_cambiar",
-                 "intentos", "bloqueado_hasta", "sello", "creado_en", "ultimo_acceso",
-                 # 1.5.0
-                 "informes"],
+                 "intentos", "bloqueado_hasta", "sello", "creado_en", "ultimo_acceso"],
     "Bitacora": ["fecha", "usuario", "accion", "registro_id", "detalle"],
     "Config": ["clave", "valor", "descripcion"],
 }
@@ -454,8 +448,6 @@ def registro(f, consec, sufijo, por_clave):
         "motivo_cancelacion": "", "creado_por": "migración", "creado_en": AHORA,
         "modificado_por": "", "modificado_en": AHORA, "version": 1,
         "origen": f"Minutario {ANIO} · {hoja} · fila {fila}",
-        "turnado_usuario": "",
-        "fecha_atencion": "",
     }
 
 
@@ -493,8 +485,6 @@ CONFIG = [
     ["plazo_dias", "", "Días hábiles por omisión para la fecha límite de un entrante (vacío = sin fecha límite)"],
     ["url_web", "", "Dirección pública de la app si se publica fuera de Google (Vercel). Vacío = se usa la de Google"],
     ["esquema", "1", "Versión del esquema de la base (no la cambies)"],
-    ["mantenimiento", "NO", "SI = solo los administradores pueden usar el sistema (se cambia en Configuración)"],
-    ["mantenimiento_msg", "", "Mensaje que ve la gente mientras hay mantenimiento"],
 ]
 
 

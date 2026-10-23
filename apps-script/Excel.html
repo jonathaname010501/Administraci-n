@@ -147,9 +147,7 @@ var ExcelCG = (function () {
       var celdas = fila.map(function (v, i) {
         var ref = letra(i) + r, tipo = (h.tipos || [])[i] || 'texto';
         if (tipo === 'fecha') {
-          var s = /^\d{4}-\d{2}-\d{2}$/.test(String(v || '')) ? serial(v) : null;
-          // Si no es una fecha AAAA-MM-DD, se deja el texto tal cual (no se pierde nada)
-          if (s === null && v !== null && v !== undefined && v !== '') return celdaTexto(ref, v, alt ? 9 : 8);
+          var s = serial(v);
           return s === null ? '<c r="' + ref + '" s="' + (alt ? 7 : 6) + '"/>' : '<c r="' + ref + '" s="' + (alt ? 7 : 6) + '"><v>' + s + '</v></c>';
         }
         if (tipo === 'numero' && v !== '' && v !== null && !isNaN(Number(v))) return '<c r="' + ref + '" s="11"><v>' + Number(v) + '</v></c>';
