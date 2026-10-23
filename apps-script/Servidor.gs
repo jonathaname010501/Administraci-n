@@ -21,7 +21,7 @@
  * ════════════════════════════════════════════════════════════════════════
  */
 
-var VERSION = '1.2.1';   // súbela junto con VERSION_APP (App.html) en cada cambio
+var VERSION = '1.3.0';   // súbela junto con VERSION_APP (App.html) en cada cambio
 var ZONA = 'America/Mexico_City';
 var ITERACIONES_CLAVE = 1000;      // PBKDF2-HMAC-SHA256
 var MAX_INTENTOS = 5;              // contraseñas fallidas antes de bloquear
@@ -80,9 +80,16 @@ var ORDEN_TIPOS = ['OFS', 'OFE', 'OFC', 'CIR', 'TAR', 'VOL'];
 var ESTATUS = ['Pendiente', 'En trámite', 'Atendido', 'Concluido', 'Cancelado'];
 var ROLES = { admin: 'Administrador', captura: 'Captura', consulta: 'Consulta' };
 
+// Memoria de UNA petición: la hoja se abre una sola vez por llamada. Se vacía
+// al entrar a api(), doGet() y las funciones del editor (nuevaPeticion_), así
+// nunca se reutiliza nada entre una petición y otra.
+var MEMO_ = {};
+function nuevaPeticion_() { MEMO_ = {}; }
+
 /* ═══════════════════════════ Entrada de la app web ═════════════════════ */
 
 function doGet() {
+  nuevaPeticion_();
   // Si la app ya vive en otra dirección (Vercel), aquí solo se deja un enlace.
   var web = '';
   try { web = config_().url_web || ''; } catch (e) { /* aún sin instalar */ }
@@ -140,6 +147,7 @@ function escHtml_(s) {
  * Responde { ok: true, datos } o { ok: false, codigo, error, extra }.
  */
 function api(token, accion, datos) {
+  nuevaPeticion_();
   try {
     datos = datos || {};
     if (typeof accion !== 'string') throw falla_('PETICION', 'Petición inválida.');
@@ -168,13 +176,14 @@ var ACCIONES_ = {
   indicadores: { fn: function (yo) { return indicadores_(yo); } },
   listar: { fn: listar_ },
   obtener: { fn: obtener_ },
-  guardar: { fn: guardar_, rol: 'captura' },
-  cancelar: { fn: cancelar_, rol: 'admin' },
+  listarTodo: { fn: listarTodo_ },
+  guardar: { fn: conDetalle_(guardar_), rol: 'captura' },
+  cancelar: { fn: conDetalle_(cancelar_), rol: 'admin' },
   pendientes: { fn: pendientes_ },
   exportar: { fn: exportar_, rol: 'admin' },   // descargar datos: solo administradores
-  subirArchivo: { fn: subirArchivo_, rol: 'captura' },
+  subirArchivo: { fn: conDetalle_(subirArchivo_), rol: 'captura' },
   descargarArchivo: { fn: descargarArchivo_ },
-  quitarArchivo: { fn: quitarArchivo_, rol: 'captura' },
+  quitarArchivo: { fn: conDetalle_(quitarArchivo_), rol: 'captura' },
   directorio: { fn: listarDirectorio_ },
   guardarPersona: { fn: guardarPersona_, rol: 'captura' },
   unirPersonas: { fn: unirPersonas_, rol: 'admin' },
@@ -241,7 +250,12 @@ function entrar_(d) {
   o.ultimo_acceso = sello_(ahora);
   escribirFila_(t.sh, HOJAS.USR, u.fila, o);
   bitacora_(usuario, 'entrar', '', '');
-  return { token: abrirSesion_(o), debe_cambiar: o.debe_cambiar === 'SI', nombre: o.nombre };
+  var res = { token: abrirSesion_(o), debe_cambiar: o.debe_cambiar === 'SI', nombre: o.nombre };
+  // Para no hacer otra vuelta al servidor, la entrada ya trae los datos del portal.
+  if (!res.debe_cambiar) {
+    try { res.inicio = inicio_(yoDe_(o)); } catch (e) { console.warn('entrar: sin inicio (' + e.message + ')'); }
+  }
+  return res;
 }
 
 function abrirSesion_(o) {
@@ -266,6 +280,11 @@ function sesion_(token) {
     s.t = Date.now();
     cache.put('ses:' + token, JSON.stringify(s), SESION_SEG);
   }
+  return yoDe_(u);
+}
+
+/** El usuario tal como lo usan las acciones (rol y libretas permitidas). */
+function yoDe_(u) {
   return {
     usuario: u.usuario, nombre: u.nombre, rol: u.rol, debe_cambiar: u.debe_cambiar === 'SI',
     tipos: u.rol === 'admin' || u.tipos === '*' ? ORDEN_TIPOS.slice() :
@@ -445,6 +464,8 @@ function resumen_(r) {
   return o;
 }
 
+function ordenLista_(a, b) { return b.consecutivo - a.consecutivo || (b.sufijo > a.sufijo ? 1 : -1); }
+
 function listar_(yo, d) {
   var tipo = String(d.tipo || '');
   puedeTipo_(yo, tipo);
@@ -452,7 +473,19 @@ function listar_(yo, d) {
   return tabla_(HOJAS.REG).filas
     .filter(function (f) { return f.o.tipo === tipo && Number(f.o.anio) === anio; })
     .map(function (f) { return resumen_(f.o); })
-    .sort(function (a, b) { return b.consecutivo - a.consecutivo || (b.sufijo > a.sufijo ? 1 : -1); });
+    .sort(ordenLista_);
+}
+
+/** Las listas del año de TODAS las libretas del usuario en una sola vuelta (la página las precarga). */
+function listarTodo_(yo) {
+  var anio = Number(Utilities.formatDate(new Date(), ZONA, 'yyyy'));
+  var listas = {};
+  yo.tipos.forEach(function (t) { listas[t] = []; });
+  tabla_(HOJAS.REG).filas.forEach(function (f) {
+    if (listas[f.o.tipo] && Number(f.o.anio) === anio) listas[f.o.tipo].push(resumen_(f.o));
+  });
+  Object.keys(listas).forEach(function (t) { listas[t].sort(ordenLista_); });
+  return { anio: anio, listas: listas };
 }
 
 function obtener_(yo, d) {
@@ -460,12 +493,66 @@ function obtener_(yo, d) {
   var f = buscarRegistro_(t, d.id);
   puedeTipo_(yo, f.o.tipo);
   var r = publico_(f.o);
-  var ligados = t.filas.filter(function (x) {
-    return x.o.id !== f.o.id && (x.o.relacionado_id === f.o.id || x.o.id === f.o.relacionado_id) && yo.tipos.indexOf(x.o.tipo) >= 0;
+  return { registro: r, ligados: ligados_(yo, t.filas, r), historial: historial_(f.o.id, 100) };
+}
+
+/** Registros ligados (responde a / respondido con) que el usuario puede ver. */
+function ligados_(yo, filas, r) {
+  return filas.filter(function (x) {
+    return x.o.id !== r.id && (x.o.relacionado_id === r.id || x.o.id === r.relacionado_id) && yo.tipos.indexOf(x.o.tipo) >= 0;
   }).map(function (x) { return resumen_(x.o); });
-  var hist = tabla_(HOJAS.BIT).filas.filter(function (x) { return x.o.registro_id === f.o.id; })
-    .map(function (x) { return x.o; }).reverse().slice(0, 100);
-  return { registro: r, ligados: ligados, historial: hist };
+}
+
+/**
+ * Movimientos de un registro en la bitácora, del más reciente al más viejo.
+ * No lee toda la bitácora (crece todos los días): busca el ID solo en la
+ * columna registro_id y lee únicamente esos renglones.
+ */
+function historial_(id, max) {
+  id = String(id || '');
+  var sh = hoja_(HOJAS.BIT), cols = COLS[HOJAS.BIT];
+  revisarEncabezado_(sh, HOJAS.BIT);
+  var n = sh.getLastRow();
+  if (!id || n < 2) return [];
+  var col = cols.indexOf('registro_id') + 1;
+  var filas = sh.getRange(2, col, n - 1, 1).createTextFinder(id).matchCase(true).matchEntireCell(true).findAll()
+    .map(function (r) { return r.getRow(); })
+    .sort(function (a, b) { return a - b; })
+    .slice(-max);
+  var out = [];
+  // Renglones seguidos se leen juntos
+  for (var i = 0; i < filas.length; ) {
+    var j = i;
+    while (j + 1 < filas.length && filas[j + 1] === filas[j] + 1) j++;
+    sh.getRange(filas[i], 1, j - i + 1, cols.length).getValues().forEach(function (v) {
+      var o = {};
+      for (var c = 0; c < cols.length; c++) o[cols[c]] = leerValor_(v[c], false);
+      if (o.registro_id === id) out.push(o);
+    });
+    i = j + 1;
+  }
+  return out.reverse();
+}
+
+/**
+ * Guardar, cancelar y mover archivos regresan además lo que muestra el panel
+ * del registro (ligados e historial), para que la página no tenga que pedirlo
+ * en otra vuelta. Se arma ya sin el candado. Si algo falla aquí, el cambio
+ * ya quedó guardado y la página pide el detalle por separado.
+ */
+function conDetalle_(fn) {
+  return function (yo, d, token) {
+    var res = fn(yo, d, token);
+    if (res && res.registro && res.registro.id) {
+      try {
+        SpreadsheetApp.flush();
+        res.detalle = { ligados: ligados_(yo, MEMO_.filasReg || tabla_(HOJAS.REG).filas, res.registro), historial: historial_(res.registro.id, 100) };
+      } catch (e) {
+        console.warn('detalle tras guardar: ' + e.message);
+      }
+    }
+    return res;
+  };
 }
 
 /** Lo que sí puede ver el navegador de un registro (sin IDs de Drive). */
@@ -1031,13 +1118,14 @@ function listarBitacora_(yo, d) {
   var desde = String(d.desde || ''), hasta = String(d.hasta || '');
   var usuario = String(d.usuario || ''), accion = String(d.accion || '');
   var q = String(d.texto || '').toLowerCase();
-  var filas = tabla_(HOJAS.BIT).filas.map(function (f) { return f.o; }).filter(function (o) {
+  var todas = tabla_(HOJAS.BIT).filas;
+  var filas = todas.map(function (f) { return f.o; }).filter(function (o) {
     var dia = String(o.fecha).slice(0, 10);
     return (!desde || dia >= desde) && (!hasta || dia <= hasta) && (!usuario || o.usuario === usuario) &&
       (!accion || o.accion === accion) && (!q || (o.detalle + ' ' + o.registro_id).toLowerCase().indexOf(q) >= 0);
   });
   var usuarios = {}, acciones = {};
-  tabla_(HOJAS.BIT).filas.forEach(function (f) { usuarios[f.o.usuario] = true; acciones[f.o.accion] = true; });
+  todas.forEach(function (f) { usuarios[f.o.usuario] = true; acciones[f.o.accion] = true; });
   return { filas: filas.reverse().slice(0, 500), total: filas.length, usuarios: Object.keys(usuarios).sort(), acciones: Object.keys(acciones).sort() };
 }
 
@@ -1074,16 +1162,34 @@ function guardarConfig_(yo, d) {
 
 /* ═══════════════════════════ Acceso a la hoja ═════════════════════════ */
 
+/** La hoja de la base. Se abre una sola vez por petición (MEMO_). */
 function libro_() {
+  if (MEMO_.libro) return MEMO_.libro;
   var id = PropertiesService.getScriptProperties().getProperty('ID_HOJA');
   if (!id) throw falla_('INSTALACION', 'El sistema no está instalado. Corre instalar() desde el editor de Apps Script.');
-  return SpreadsheetApp.openById(id);
+  MEMO_.libro = SpreadsheetApp.openById(id);
+  return MEMO_.libro;
 }
 
 function hoja_(nombre) {
+  var hojas = MEMO_.hojas || (MEMO_.hojas = {});
+  if (hojas[nombre]) return hojas[nombre];
   var sh = libro_().getSheetByName(nombre);
   if (!sh) throw falla_('INSTALACION', 'Falta la pestaña «' + nombre + '». Corre instalar() desde el editor.');
+  hojas[nombre] = sh;
   return sh;
+}
+
+/** Si alguien movió columnas a mano, se detiene antes de leer o escribir en el lugar equivocado. */
+function revisarEncabezado_(sh, nombre, fila1) {
+  var cols = COLS[nombre];
+  fila1 = fila1 || sh.getRange(1, 1, 1, cols.length).getValues()[0];
+  for (var c0 = 0; c0 < cols.length; c0++) {
+    if (String(fila1[c0]).trim() !== cols[c0]) {
+      throw falla_('INSTALACION', 'Las columnas de la pestaña «' + nombre + '» no son las esperadas (columna ' + (c0 + 1) +
+        ' debería ser «' + cols[c0] + '»). No muevas columnas a mano; corre revisarSeguridad() desde el editor.');
+    }
+  }
 }
 
 /** Lee una pestaña completa → { sh, filas: [{ fila, o }] } (fila = número de renglón en la hoja). */
@@ -1092,12 +1198,7 @@ function tabla_(nombre) {
   var cols = COLS[nombre];
   var n = Math.max(1, sh.getLastRow());
   var todo = sh.getRange(1, 1, n, cols.length).getValues();
-  for (var c0 = 0; c0 < cols.length; c0++) {
-    if (String(todo[0][c0]).trim() !== cols[c0]) {
-      throw falla_('INSTALACION', 'Las columnas de la pestaña «' + nombre + '» no son las esperadas (columna ' + (c0 + 1) +
-        ' debería ser «' + cols[c0] + '»). No muevas columnas a mano; corre revisarSeguridad() desde el editor.');
-    }
-  }
+  revisarEncabezado_(sh, nombre, todo[0]);
   var valores = todo.slice(1);
   var num = NUMERICAS[nombre] || {};
   var filas = [];
@@ -1108,6 +1209,7 @@ function tabla_(nombre) {
     for (var c = 0; c < cols.length; c++) o[cols[c]] = leerValor_(v[c], num[cols[c]]);
     filas.push({ fila: i + 2, o: o });
   }
+  if (nombre === HOJAS.REG) MEMO_.filasReg = filas;   // la última lectura (la usa conDetalle_)
   return { sh: sh, filas: filas };
 }
 

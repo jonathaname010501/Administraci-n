@@ -27,11 +27,14 @@ function crearEntorno({ dueno = "dueno@gmail.com" } = {}) {
     static now() { return RealDate.now() + reloj.offset; }
   }
   const estado = { activo: dueno, dueno, errores: [], logs: [], url: "" };
+  // Contadores para medir cuánto trabaja cada acción (aperturas de la hoja, lecturas, celdas).
+  const medidas = { aperturas: 0, lecturas: 0, celdas: 0, busquedas: 0, cache: 0, propiedades: 0 };
 
   // ── Hojas ─────────────────────────────────────────────────────────
   class Rango {
     constructor(h, r, c, nr, nc) { Object.assign(this, { h, r, c, nr, nc }); }
     getValues() {
+      medidas.lecturas++; medidas.celdas += this.nr * this.nc;
       const out = [];
       for (let i = 0; i < this.nr; i++) {
         const fila = [];
@@ -65,6 +68,27 @@ function crearEntorno({ dueno = "dueno@gmail.com" } = {}) {
       return this;
     }
     setNumberFormats(m) { m.forEach((f, i) => f.forEach((x, j) => ((this.h.formatos[this.r - 1 + i] = this.h.formatos[this.r - 1 + i] || [])[this.c - 1 + j] = x))); return this; }
+    getRow() { return this.r; }
+    /** Como Range.createTextFinder de Sheets (solo lo que usa el servidor). */
+    createTextFinder(texto) {
+      const rango = this, op = { entera: false, mayus: false };
+      const tf = {
+        matchEntireCell(v) { op.entera = !!v; return tf; },
+        matchCase(v) { op.mayus = !!v; return tf; },
+        findAll() {
+          medidas.busquedas++;
+          const out = [], buscado = op.mayus ? String(texto) : String(texto).toLowerCase();
+          for (let i = 0; i < rango.nr; i++) for (let j = 0; j < rango.nc; j++) {
+            const v = (rango.h.datos[rango.r - 1 + i] || [])[rango.c - 1 + j];
+            if (v === undefined || v === null || v === "") continue;
+            const s = op.mayus ? String(v) : String(v).toLowerCase();
+            if (op.entera ? s === buscado : s.indexOf(buscado) >= 0) out.push(new Rango(rango.h, rango.r + i, rango.c + j, 1, 1));
+          }
+          return out;
+        },
+      };
+      return tf;
+    }
     setFontWeight() { return this; }
     setBackground() { return this; }
     setFontColor() { return this; }
@@ -154,8 +178,8 @@ function crearEntorno({ dueno = "dueno@gmail.com" } = {}) {
   // ── Servicios varios ──────────────────────────────────────────────
   const cacheMap = new Map();
   const CacheService = { getScriptCache: () => ({
-    get: (k) => { const e = cacheMap.get(k); if (!e || e.exp < FDate.now()) { cacheMap.delete(k); return null; } return e.v; },
-    put: (k, v, seg = 600) => { if (String(v).length > 100000) throw new Error("Valor de caché demasiado grande"); cacheMap.set(k, { v: String(v), exp: FDate.now() + seg * 1000 }); },
+    get: (k) => { medidas.cache++; const e = cacheMap.get(k); if (!e || e.exp < FDate.now()) { cacheMap.delete(k); return null; } return e.v; },
+    put: (k, v, seg = 600) => { medidas.cache++; if (String(v).length > 100000) throw new Error("Valor de caché demasiado grande"); cacheMap.set(k, { v: String(v), exp: FDate.now() + seg * 1000 }); },
     remove: (k) => cacheMap.delete(k),
   }) };
   const candado = { tomado: false, veces: 0 };
@@ -166,7 +190,7 @@ function crearEntorno({ dueno = "dueno@gmail.com" } = {}) {
   }) };
   const props = new Map();
   const PropertiesService = { getScriptProperties: () => ({
-    getProperty: (k) => (props.has(k) ? props.get(k) : null), setProperty: (k, v) => props.set(k, String(v)), deleteProperty: (k) => props.delete(k),
+    getProperty: (k) => { medidas.propiedades++; return props.has(k) ? props.get(k) : null; }, setProperty: (k, v) => props.set(k, String(v)), deleteProperty: (k) => props.delete(k),
   }) };
   const disparadores = [];
   const ScriptApp = {
@@ -181,7 +205,7 @@ function crearEntorno({ dueno = "dueno@gmail.com" } = {}) {
   const SpreadsheetApp = {
     ProtectionType: { SHEET: "SHEET" },
     getActiveSpreadsheet: () => libroActivo,
-    openById: (id) => { const l = libros.get(id); if (!l) throw new Error("No existe la hoja " + id); return l; },
+    openById: (id) => { medidas.aperturas++; const l = libros.get(id); if (!l) throw new Error("No existe la hoja " + id); return l; },
     flush: () => {},
   };
 
@@ -220,7 +244,9 @@ function crearEntorno({ dueno = "dueno@gmail.com" } = {}) {
   }
 
   return {
-    ctx, estado, reloj, candado, drive, props, disparadores, cacheMap,
+    ctx, estado, reloj, candado, drive, props, disparadores, cacheMap, medidas,
+    /** Pone los contadores en cero y devuelve los anteriores. */
+    medir() { const m = { ...medidas }; Object.keys(medidas).forEach((k) => { medidas[k] = 0; }); return m; },
     libro: () => libroActivo,
     funcionesDeclaradas,
     /** Llama una función del servidor como lo haría google.script.run. */

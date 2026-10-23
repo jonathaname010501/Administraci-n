@@ -62,7 +62,7 @@ test("doGet arma la página completa con estilos, Excel y app (aunque Google qui
   assert.match(html, /<style>[\s\S]*--color-morado: #8f4889[\s\S]*<\/style>\s*<\/head><body>/, "estilos dentro del head");
   assert.match(html, /<div id="app" class="app">/);
   assert.match(html, /<script>[\s\S]*var ExcelCG = [\s\S]*<\/script>/);
-  assert.match(html, /<script>[\s\S]*function llamar\(accion, datos\)[\s\S]*<\/script>\s*<\/body><\/html>$/);
+  assert.match(html, /<script>[\s\S]*function llamar\(accion, datos, op\)[\s\S]*<\/script>\s*<\/body><\/html>$/);
   assert.equal((html.match(/<script>/g) || []).length, 2, "solo los dos bloques de código");
 });
 
@@ -501,4 +501,67 @@ testBase("exportación: solo admin, por libreta y por rango de fechas", () => {
   assert.equal(e.api(e.admin, "exportar", { tipo: "TODOS", desde: "2026-13-01" }).codigo, "DATOS");
   const bit = e.api(e.admin, "bitacora", { accion: "exportación" }).datos.filas;
   assert.match(bit[0].detalle, /del 2026-06-01 al 2026-06-30/);
+});
+
+testBase("velocidad: la hoja se abre una vez por petición y el historial no lee toda la bitácora", () => {
+  const e = preparar();
+  // Un año de uso: 20,000 movimientos en la bitácora
+  const bit = e.hoja("Bitacora");
+  bit.maxRows = 21000;
+  for (let i = 0; i < 20000; i++) {
+    const fila = bit.getLastRow() + 1;
+    bit.datos[fila - 1] = ["2026-03-01 10:00:00", "u" + (i % 5), i % 4 ? "entrar" : "edición", i % 4 ? "" : "m-ofs-2026-00" + (1 + (i % 9)), "x"];
+    bit.formatos[fila - 1] = ["@", "@", "@", "@", "@"];
+  }
+  e.medir();
+  const det = e.api(e.admin, "obtener", { id: "m-ofs-2026-003" }).datos;
+  const m = e.medir();
+  assert.equal(m.aperturas, 1, "una sola apertura de la hoja");
+  assert.ok(m.celdas < 30000, "no se leyó la bitácora completa (" + m.celdas + " celdas)");
+  assert.equal(det.historial.length, 100, "los 100 más recientes");
+  assert.ok(det.historial.every((x) => x.registro_id === "m-ofs-2026-003"));
+  for (const [acc, d] of [["inicio"], ["listar", { tipo: "OFS", anio: 2026 }], ["pendientes"], ["guardar", nuevoOficio()], ["bitacora"]]) {
+    e.medir();
+    assert.equal(e.api(e.admin, acc, d).ok, true, acc);
+    assert.equal(e.medir().aperturas, 1, acc + ": una sola apertura");
+  }
+});
+
+testBase("velocidad: entrar trae el portal y guardar trae el detalle (una vuelta menos)", () => {
+  const e = preparar();
+  const ent = e.api(null, "entrar", { usuario: "admin", clave: "Gestion2026" }).datos;
+  assert.ok(ent.inicio && ent.inicio.yo.usuario === "admin" && ent.inicio.indicadores.porTipo.OFS, "entrar trae los datos del portal");
+  assert.deepEqual(Object.keys(ent.inicio).sort(), Object.keys(e.api(ent.token, "inicio").datos).sort());
+  // con contraseña temporal no trae nada más
+  const r = e.api(e.admin, "guardarUsuario", { nuevo: true, usuario: "nuevo.u", nombre: "Nuevo", rol: "consulta", tipos: ["OFE"] }).datos;
+  const temp = e.api(null, "entrar", { usuario: "nuevo.u", clave: r.temporal }).datos;
+  assert.equal(temp.debe_cambiar, true);
+  assert.equal(temp.inicio, undefined);
+  // guardar (alta y respuesta) regresa ligados e historial, igual que obtener
+  const orig = e.api(e.admin, "guardar", { ...nuevoOficio(), tipo: "OFE", numero: "SAPCI/X/0001/2026", estatus: "Pendiente" }).datos;
+  assert.equal(orig.detalle.historial[0].accion, "alta");
+  const resp = e.api(e.admin, "guardar", nuevoOficio({ relacionado_id: orig.registro.id, marcarAtendido: true, asunto: "Respuesta" })).datos;
+  const obt = e.api(e.admin, "obtener", { id: resp.registro.id }).datos;
+  assert.deepEqual(resp.detalle.ligados, obt.ligados);
+  assert.deepEqual(resp.detalle.historial, obt.historial);
+  assert.equal(resp.detalle.ligados[0].estatus, "Atendido");
+  const ed = e.api(e.admin, "guardar", { ...resp.registro, asunto: "Respuesta corregida" }).datos;
+  assert.deepEqual(ed.detalle.historial, e.api(e.admin, "obtener", { id: resp.registro.id }).datos.historial);
+  const can = e.api(e.admin, "cancelar", { id: resp.registro.id, version: ed.registro.version, motivo: "Prueba de cancelación" }).datos;
+  assert.equal(can.detalle.historial[0].accion, "cancelación");
+  const sub = e.api(e.admin, "subirArchivo", { id: orig.registro.id, clase: "oficio", nombre: "a.pdf", mime: "application/pdf", base64: PDF }).datos;
+  assert.equal(sub.detalle.historial[0].accion, "archivo");
+  assert.equal(JSON.stringify(sub).indexOf("archivo_id"), -1, "no se mandan IDs de Drive");
+});
+
+testBase("velocidad: la precarga de listas respeta las libretas de cada quien", () => {
+  const e = preparar();
+  const con = alta(e, "carla", "consulta", ["OFE", "CIR"]);
+  const p = e.api(con, "listarTodo").datos;
+  assert.deepEqual(Object.keys(p.listas).sort(), ["CIR", "OFE"]);
+  assert.deepEqual(p.listas.OFE, e.api(con, "listar", { tipo: "OFE", anio: p.anio }).datos);
+  assert.equal(e.api(null, "listarTodo").codigo, "SESION");
+  const adm = e.api(e.admin, "listarTodo").datos;
+  assert.equal(Object.keys(adm.listas).length, 6);
+  assert.equal(adm.listas.OFS.length, 416);
 });

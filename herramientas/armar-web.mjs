@@ -93,6 +93,9 @@ const html = `<!DOCTYPE html>
   <link rel="manifest" href="manifest.webmanifest?v=${v["manifest.webmanifest"]}">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <!-- Abre de antemano la conexión con el servidor de Google (la primera llamada tarda menos) -->
+  <link rel="preconnect" href="https://script.google.com" crossorigin>
+  <link rel="preconnect" href="https://script.googleusercontent.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Cabin:wght@500;600;700&family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="estilos.css?v=${v["estilos.css"]}">
 </head>

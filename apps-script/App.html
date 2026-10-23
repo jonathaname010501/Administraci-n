@@ -14,7 +14,7 @@
 
   // Versión de esta página. Debe coincidir con VERSION de Servidor.gs: si la
   // página (Vercel) se actualiza y el servidor (Apps Script) no, se avisa.
-  var VERSION_APP = '1.2.1';
+  var VERSION_APP = '1.3.0';
 
   /* ───────────────────────── Utilidades ───────────────────────── */
   var ICONOS = {
@@ -114,7 +114,10 @@
   /* ───────────────────────── Estado ───────────────────────── */
   var E = {
     token: leerLocal('cg_token'), ini: null, publico: null, vista: 'registros', tipo: null, anio: null,
-    lista: [], filtros: { q: '', estatus: '', acuse: '' }, mostrar: 60, directorio: []
+    lista: [], listaClave: null, filtros: { q: '', estatus: '', acuse: '' }, mostrar: 60, directorio: [],
+    // Memoria de la sesión, solo en esta pestaña y nunca en disco: listas ya vistas y pendientes.
+    // gen cambia al entrar o salir, para descartar respuestas de una sesión anterior.
+    listas: {}, pend: null, gen: 0, iniT: 0
   };
   var app = document.getElementById('app');
 
@@ -163,10 +166,12 @@
       });
   }
 
-  function llamar(accion, datos) {
-    progreso(1);
+  /** op.silencioso: para lo que se actualiza en segundo plano (sin barra de progreso). */
+  function llamar(accion, datos, op) {
+    var barra = !(op && op.silencioso);
+    if (barra) progreso(1);
     return transporte(accion, datos).then(function (r) {
-      progreso(-1);
+      if (barra) progreso(-1);
       if (r && r.ok) return r.datos;
       var e = new Error(r && r.error ? r.error : 'Respuesta inesperada del servidor.');
       e.codigo = r && r.codigo; e.extra = r && r.extra;
@@ -174,7 +179,7 @@
       else if (e.codigo === 'CAMBIAR_CLAVE') { pantallaCambiarClave(true); }
       throw e;
     }, function (err) {
-      progreso(-1);
+      if (barra) progreso(-1);
       if (err && err.codigo === 'SERVIDOR') throw err;
       var e = new Error(window.CG_API && !(window.google && google.script)
         ? 'No hubo conexión con el servidor de Google. Revisa tu internet; si sigue igual, revisa que la implementación diga «Cualquier usuario» y que CG_API_URL en Vercel sea la URL /exec.'
@@ -362,6 +367,7 @@
         E.token = r.token; guardarLocal('cg_token', r.token);
         E.usuarioEntrada = u;
         if (r.debe_cambiar) pantallaCambiarClave(true, clave.input.value);
+        else if (r.inicio) aplicarInicio(r.inicio);   // entrar ya trae el portal: una vuelta menos
         else cargarInicio();
       }).catch(function (e) {
         ocupado(false);
@@ -430,11 +436,24 @@
         h('p', { class: 'login__ayuda' }, h('a', { href: '#', onclick: function (ev) { ev.preventDefault(); terminarSesion(); } }, 'Salir sin cambiarla'))]));
   }
 
+  function olvidarDatos() { E.gen++; E.listas = {}; E.pend = null; E.lista = []; E.listaClave = null; E.iniT = 0; }
+
   function terminarSesion(mensaje) {
+    // Los encabezados de la pantalla de entrada salen de lo que ya se tenía
+    if (!E.publico && E.ini) E.publico = { encabezados: E.ini.config.encabezados, version: E.ini.version };
     E.token = null; E.ini = null; guardarLocal('cg_token', null);
+    olvidarDatos();
     pila.slice().forEach(function (v) { v.cerrar(); });
     cerrarPanel();
-    pantallaEntrar(mensaje);
+    if (E.publico) pantallaEntrar(mensaje);
+    else estadoPublico().catch(function () {}).then(function () { if (!E.token) pantallaEntrar(mensaje); });
+  }
+
+  // Los encabezados de la pantalla de entrada se piden una sola vez y solo si hacen falta.
+  var pEstado = null;
+  function estadoPublico() {
+    if (!pEstado) pEstado = llamar('estado', null, { silencioso: true }).then(function (p) { E.publico = p; return p; }, function (e) { pEstado = null; throw e; });
+    return pEstado;
   }
 
   /* ───────────────────────── Estructura ───────────────────────── */
@@ -479,16 +498,40 @@
     promptInstalar.userChoice.then(function () { promptInstalar = null; if (E.vista === 'inicio') irA('inicio', null, { sinHistorial: true }); }, function () {});
   }
 
+  function aplicarInicio(ini) {
+    olvidarDatos();
+    E.ini = ini;
+    E.iniT = Date.now();
+    E.directorio = ini.directorio;
+    if (!E.tipo || ini.orden.indexOf(E.tipo) < 0) E.tipo = ini.orden[0];
+    E.anio = E.anio || ini.anioActual;
+    montar();
+    var desde = usaHistorial ? leerRuta() : null;
+    irA(desde ? desde.vista : 'inicio', desde ? desde.tipo : null, { reemplazar: true });
+    precargar();
+  }
+
   function cargarInicio() {
-    return llamar('inicio').then(function (ini) {
-      E.ini = ini;
-      E.directorio = ini.directorio;
-      if (!E.tipo || ini.orden.indexOf(E.tipo) < 0) E.tipo = ini.orden[0];
-      E.anio = E.anio || ini.anioActual;
-      montar();
-      var desde = usaHistorial ? leerRuta() : null;
-      irA(desde ? desde.vista : 'inicio', desde ? desde.tipo : null, { reemplazar: true });
-    }).catch(function (e) { if (e.codigo !== 'SESION' && e.codigo !== 'CAMBIAR_CLAVE') pantallaEntrar(e.message); });
+    return llamar('inicio').then(aplicarInicio).catch(function (e) {
+      if (e.codigo !== 'SESION' && e.codigo !== 'CAMBIAR_CLAVE') estadoPublico().catch(function () {}).then(function () { pantallaEntrar(e.message); });
+    });
+  }
+
+  /**
+   * Después de entrar, en segundo plano: las listas del año de todas las
+   * libretas (en una sola vuelta) y luego Pendientes. Así, al abrirlas, ya se ven.
+   */
+  function precargar() {
+    var gen = E.gen, enviado = Date.now();
+    llamar('listarTodo', null, { silencioso: true }).then(function (p) {
+      if (gen !== E.gen || !p || !p.listas) return;
+      Object.keys(p.listas).forEach(function (t) { recibirLista(t, p.anio, p.listas[t], enviado); });
+    }).catch(function () { /* servidor anterior o sin red: cada libreta se carga al abrirla */ }).then(function () {
+      if (gen !== E.gen || E.pend) return null;
+      return llamar('pendientes', null, { silencioso: true }).then(function (p) {
+        if (gen === E.gen && !E.pend) E.pend = { datos: p, firma: JSON.stringify(p) };
+      });
+    }).catch(function () {});
   }
 
   var principal = null;
@@ -623,7 +666,14 @@
       });
     }
     pintar(ini.indicadores);
-    llamar('indicadores').then(function (ind) { E.ini.indicadores = ind; if (E.vista === 'inicio') pintar(ind); }).catch(function () {});
+    if (Date.now() - E.iniT > 20000) {   // recién llegados (al entrar) no se vuelven a pedir
+      var gen = E.gen;
+      llamar('indicadores', null, { silencioso: true }).then(function (ind) {
+        if (gen !== E.gen) return;
+        E.ini.indicadores = ind; E.iniT = Date.now();
+        if (E.vista === 'inicio') pintar(ind);
+      }).catch(function () {});
+    }
   };
 
   /* ───────────────────────── Libreta (su propia pantalla) ───────────────────────── */
@@ -653,9 +703,18 @@
         refsReg.indicadores),
       h('div', { class: 'herr' }, h('div', { class: 'buscador' }, icono('buscar'), q), anio, est, acu),
       refsReg.res));
-    pintarIndicadores();
-    vaciar(refsReg.res).appendChild(h('div', { class: 'tarjeta vacio' }, 'Cargando…'));
-    cargarLista();
+    var c = E.listas[E.tipo + E.anio];
+    if (c) {
+      // Ya se tenía (precarga o visita anterior): se ve al instante y se actualiza sin hacer esperar.
+      E.lista = c.lista; E.listaClave = E.tipo + E.anio;
+      pintarLista();
+      if (Date.now() - c.t > 10000) cargarLista({ silencioso: true });
+    } else {
+      E.listaClave = null;
+      pintarIndicadores();
+      vaciar(refsReg.res).appendChild(h('div', { class: 'tarjeta vacio' }, 'Cargando…'));
+      cargarLista();
+    }
   };
 
   function mesActual() { return hoyIso().slice(0, 7); }
@@ -667,7 +726,7 @@
   function pintarIndicadores() {
     var cont = refsReg.indicadores;
     if (!cont) return;
-    var l = E.lista && E.lista.length && E.lista[0].tipo === E.tipo ? E.lista : null;
+    var l = E.listaClave === E.tipo + E.anio ? E.lista : null;
     var n = function (f) { return l ? l.filter(f).length : '…'; };
     var datos = [
       ['Registros', l ? l.length : '…', function () { aplicar('', ''); }, !E.filtros.estatus && !E.filtros.acuse],
@@ -691,20 +750,64 @@
     }
   }
 
-  function cargarLista() {
-    var pedido = E.tipo + E.anio;
-    return llamar('listar', { tipo: E.tipo, anio: E.anio }).then(function (lista) {
-      if (pedido !== E.tipo + E.anio) return;
-      lista.forEach(function (r) {
-        r._b = norm([etiquetaNum(r), r.numero, r.asunto, r.dirigido_a, r.firma, r.obs, r.elaboro, r.carpeta, r.turnado_a, r.estatus].join(' '));
-      });
-      E.lista = lista;
-      if (E.anio === E.ini.anioActual) E.ini.conteos[E.tipo] = lista.length;
+  function prepararFila(r) {
+    r._b = norm([etiquetaNum(r), r.numero, r.asunto, r.dirigido_a, r.firma, r.obs, r.elaboro, r.carpeta, r.turnado_a, r.estatus].join(' '));
+    return r;
+  }
+
+  /** Guarda una lista en la memoria de la sesión y, si es la que está en pantalla y cambió, la vuelve a pintar. */
+  function recibirLista(tipo, anio, lista, enviado) {
+    var clave = tipo + anio, c = E.listas[clave];
+    if (c && c.t > enviado) return;   // ya había algo más reciente
+    var firma = JSON.stringify(lista);
+    lista.forEach(prepararFila);
+    E.listas[clave] = { lista: lista, t: enviado, firma: firma };
+    if (E.ini && anio === E.ini.anioActual) E.ini.conteos[tipo] = lista.length;
+    if (E.vista === 'libreta' && E.tipo + E.anio === clave && (E.listaClave !== clave || !c || c.firma !== firma)) {
+      E.lista = lista; E.listaClave = clave;
       pintarLista();
+    }
+  }
+
+  function cargarLista(op) {
+    var tipo = E.tipo, anio = E.anio, gen = E.gen, enviado = Date.now();
+    return llamar('listar', { tipo: tipo, anio: anio }, op).then(function (lista) {
+      if (gen === E.gen) recibirLista(tipo, anio, lista, enviado);
     }).catch(function (e) {
+      if (op && op.silencioso) return;   // ya se ve la lista en memoria
       fallo(e);
-      if (refsReg.res) vaciar(refsReg.res).appendChild(h('div', { class: 'tarjeta vacio' }, h('strong', null, 'No se pudo cargar'), e.message));
+      if (refsReg.res && E.tipo + E.anio === tipo + anio && E.listaClave !== tipo + anio) {
+        vaciar(refsReg.res).appendChild(h('div', { class: 'tarjeta vacio' }, h('strong', null, 'No se pudo cargar'), e.message));
+      }
     });
+  }
+
+  var CAMPOS_LISTA = ['id', 'tipo', 'anio', 'consecutivo', 'sufijo', 'numero', 'asunto', 'dirigido_id', 'dirigido_a', 'firma_id', 'firma',
+    'fecha', 'fecha_recepcion', 'elaboro', 'acuse', 'carpeta', 'estatus', 'fecha_limite', 'turnado_a', 'relacionado_id'];
+  function corta(s, n) { s = String(s === null || s === undefined ? '' : s); return s.length > n ? s.slice(0, n - 1) + '…' : s; }
+  function ordenLista(a, b) { return b.consecutivo - a.consecutivo || (b.sufijo > a.sufijo ? 1 : -1); }
+
+  /** Pone en la lista en memoria el registro que acaba de regresar el servidor (sin volver a pedir toda la lista). */
+  function actualizarEnLista(reg) {
+    var clave = reg.tipo + reg.anio, c = E.listas[clave];
+    if (!c) return;
+    var fila = {};
+    CAMPOS_LISTA.forEach(function (k) { fila[k] = reg[k]; });
+    fila.asunto = corta(reg.asunto, 300);
+    fila.obs = corta(reg.observaciones, 200);
+    fila.tiene_archivo = !!reg.tiene_archivo;
+    fila.tiene_acuse_archivo = !!reg.tiene_acuse_archivo;
+    prepararFila(fila);
+    var lista = c.lista.filter(function (x) { return x.id !== reg.id; }).concat([fila]).sort(ordenLista);
+    E.listas[clave] = { lista: lista, t: Date.now(), firma: null };
+    if (E.vista === 'libreta' && E.tipo + E.anio === clave) { E.lista = lista; E.listaClave = clave; pintarLista(); }
+  }
+
+  /** Después de guardar, cancelar o mover un archivo: lista y panel al día sin esperar otra vuelta al servidor. */
+  function trasCambio(res, id) {
+    if (res && res.registro) actualizarEnLista(res.registro);
+    E.iniT = 0;   // los números del portal se vuelven a pedir
+    mostrarDetalle(res, id);
   }
 
   function filtrada() {
@@ -741,8 +844,8 @@
       h('thead', null, h('tr', null, h('th', null, 'No.'), h('th', null, numEt), h('th', null, 'Asunto'), h('th', null, cp[1]), h('th', null, cf[1]), h('th', null, 'Estatus'), h('th', { 'aria-label': 'Acuse y archivo' }, ''))),
       h('tbody', null, vis.map(function (r) {
         var p = lineas(r[cp[0]]);
-        return h('tr', { class: r.estatus === 'Cancelado' ? 'cancelado' : '', tabindex: '0', onclick: function () { abrirDetalle(r.id); },
-          onkeydown: function (ev) { if (ev.key === 'Enter') abrirDetalle(r.id); } },
+        return h('tr', { class: r.estatus === 'Cancelado' ? 'cancelado' : '', tabindex: '0', onclick: function () { abrirDetalle(r.id, r); },
+          onkeydown: function (ev) { if (ev.key === 'Enter') abrirDetalle(r.id, r); } },
           h('td', { class: 't-num' }, etiquetaNum(r)),
           h('td', { class: 't-folio' }, r.numero || '—'),
           h('td', { class: 't-asunto' }, r.asunto || h('em', { style: { color: 'var(--texto-3)' } }, 'Sin asunto'), r.obs ? h('span', { class: 't-asunto__obs' }, r.obs) : null),
@@ -755,7 +858,7 @@
       })));
     var movil = h('div', { class: 'tarjeta lista-movil' }, vis.map(function (r) {
       var p = lineas(r[cp[0]]);
-      return h('div', { class: 'item', onclick: function () { abrirDetalle(r.id); } },
+      return h('div', { class: 'item', onclick: function () { abrirDetalle(r.id, r); } },
         h('div', { class: 'item__arriba' }, h('span', { class: 't-num' }, etiquetaNum(r)), r.estatus ? insEstatus(r.estatus) : null, insVence(r),
           r.acuse === 'SI' ? h('span', { class: 'ins ins--Atendido' }, 'Acuse') : null),
         h('div', { class: 'item__asunto' }, r.asunto || 'Sin asunto'),
@@ -777,13 +880,38 @@
     panelActual = null;
   }
 
-  function abrirDetalle(id) {
-    return llamar('obtener', { id: id }).then(function (d) { pintarDetalle(d); }).catch(fallo);
+  var pedidoDetalle = 0;
+  /**
+   * Abre el panel de un registro. Si viene de una lista (previa), el panel sale
+   * al instante con lo que ya se ve y se completa cuando llega lo demás.
+   */
+  function abrirDetalle(id, previa) {
+    var n = ++pedidoDetalle;
+    if (previa && !(panelActual && panelActual.id === id)) pintarDetalle({ registro: previa, ligados: [], historial: [] }, true);
+    return llamar('obtener', { id: id }).then(function (d) {
+      if (n !== pedidoDetalle) return;                                 // mientras tanto se abrió otro
+      if (previa && (!panelActual || panelActual.id !== id)) return;   // lo cerraron antes de que llegara
+      pintarDetalle(d);
+    }).catch(function (e) {
+      if (n === pedidoDetalle && panelActual && panelActual.id === id && panelActual.previo) cerrarPanel();
+      fallo(e);
+    });
   }
 
-  function pintarDetalle(d) {
-    cerrarPanel();
+  /** Pinta el panel con lo que ya regresó el servidor (guardar, cancelar, archivos); si no vino, lo pide. */
+  function mostrarDetalle(res, id) {
+    if (res && res.registro && res.detalle) {
+      pedidoDetalle++;
+      pintarDetalle({ registro: res.registro, ligados: res.detalle.ligados || [], historial: res.detalle.historial || [] });
+    } else {
+      abrirDetalle(id || (res && res.registro && res.registro.id));
+    }
+  }
+
+  function pintarDetalle(d, previo) {
     var r = d.registro, t = r.tipo, def = tipoDef(t);
+    var mismo = !!(panelActual && panelActual.id === r.id);
+    if (!mismo) cerrarPanel();
     var velo = h('div', { class: 'velo', onclick: cerrarPanel });
     var cancelado = r.estatus === 'Cancelado';
     var acciones = [];
@@ -796,6 +924,7 @@
       (navigator.clipboard ? navigator.clipboard.writeText(txt) : Promise.reject()).then(function () { aviso('Copiado: ' + txt, 'ok'); }, function () { aviso(txt); });
     } }, icono('copiar'), 'Copiar número'));
     if (esAdmin() && !cancelado) acciones.push(h('button', { class: 'btn btn--chico btn--peligro', onclick: function () { cancelarRegistro(r); } }, icono('cancelar'), 'Cancelar'));
+    if (previo) acciones.forEach(function (b) { b.disabled = true; });   // se activan cuando llega el registro completo
 
     var datos = h('dl', { class: 'datos' });
     function fila(et, valor) { datos.appendChild(h('dt', null, et)); datos.appendChild(h('dd', { class: valor ? '' : 'vacio-dd' }, valor || '—')); }
@@ -805,6 +934,7 @@
       else if (k === 'acuse') v = r.acuse === 'SI' ? 'Sí' : 'No';
       else if (k === 'fecha' || k === 'fecha_recepcion') v = fechaCorta(r[k]);
       else v = r[k];
+      if (previo && v === undefined) v = '…';
       fila(c[1], v);
     });
 
@@ -816,17 +946,18 @@
 
     var ligados = d.ligados.length ? h('div', { style: { display: 'grid', gap: '6px' } }, d.ligados.map(function (x) {
       var rel = x.id === r.relacionado_id ? 'Responde a' : 'Respondido con';
-      return h('button', { class: 'ligado', onclick: function () { abrirDetalle(x.id); } },
+      return h('button', { class: 'ligado', onclick: function () { abrirDetalle(x.id, x); } },
         h('div', { style: { flex: 1, minWidth: 0 } }, h('div', { style: { fontSize: '12px', color: 'var(--texto-3)' } }, rel + ' · ' + tipoDef(x.tipo).singular),
           h('div', null, h('strong', { class: 't-num' }, etiquetaNum(x)), ' ', x.numero || ''), h('div', { style: { fontSize: '12.5px' } }, x.asunto)),
         insEstatus(x.estatus));
     })) : null;
 
-    var archivos = h('div', { style: { display: 'grid', gap: '8px' } },
+    var cargando = function () { return h('p', { style: { margin: 0, color: 'var(--texto-3)' } }, 'Cargando…'); };
+    var archivos = previo ? cargando() : h('div', { style: { display: 'grid', gap: '8px' } },
       bloqueArchivo(r, 'oficio', 'Documento escaneado', r.tiene_archivo, r.archivo_nombre),
       bloqueArchivo(r, 'acuse', t === 'OFE' ? 'Oficio original / acuse' : 'Acuse', r.tiene_acuse_archivo, r.acuse_archivo_nombre));
 
-    var hist = h('ul', { class: 'historial' }, d.historial.length ? d.historial.map(function (x) {
+    var hist = previo ? cargando() : h('ul', { class: 'historial' }, d.historial.length ? d.historial.map(function (x) {
       return h('li', null, h('strong', null, x.accion), ' · ', h('span', null, fechaCorta(x.fecha) + ' ' + String(x.fecha).slice(11, 16) + ' · ' + x.usuario), x.detalle ? h('div', null, x.detalle) : null);
     }) : h('li', null, h('span', null, 'Sin movimientos registrados en el sistema.')));
 
@@ -842,20 +973,32 @@
         h('section', { class: 'seccion' }, h('h3', null, 'Seguimiento'), seg, ligados ? h('div', { style: { marginTop: '10px' } }, ligados) : null),
         h('section', { class: 'seccion' }, h('h3', null, 'Archivos'), archivos),
         h('section', { class: 'seccion' }, h('h3', null, 'Historial'), hist),
-        h('div', { style: { fontSize: '12px', color: 'var(--texto-3)' } },
+        previo ? null : h('div', { style: { fontSize: '12px', color: 'var(--texto-3)' } },
           'Capturó ' + (r.creado_por || '—') + ' el ' + fechaCorta(r.creado_en) + ' · Última modificación: ' + (r.modificado_por || r.creado_por || '—') + ' ' + fechaCorta(r.modificado_en) +
           (r.origen && r.origen !== 'App' ? ' · Origen: ' + r.origen : ''))));
     function tecla(ev) { if (ev.key === 'Escape' && !pila.length) cerrarPanel(); }
+    if (mismo) {
+      // El mismo registro ya está abierto: se cambia el contenido en su lugar, sin volver a animar.
+      var viejo = panelActual.panel, cv = viejo.querySelector('.panel__cuerpo'), arriba = cv ? cv.scrollTop : 0;
+      panel.style.animation = 'none';
+      viejo.replaceWith(panel);
+      var cn = panel.querySelector('.panel__cuerpo');
+      if (cn) cn.scrollTop = arriba;
+      document.removeEventListener('keydown', panelActual.tecla);
+      document.addEventListener('keydown', tecla);
+      panelActual.panel = panel; panelActual.tecla = tecla; panelActual.previo = !!previo;
+      return;
+    }
     document.addEventListener('keydown', tecla);
     document.body.appendChild(velo);
     document.body.appendChild(panel);
-    panelActual = { velo: velo, panel: panel, tecla: tecla, id: r.id };
+    panelActual = { velo: velo, panel: panel, tecla: tecla, id: r.id, previo: !!previo };
   }
 
   function bloqueArchivo(r, clase, titulo, tiene, nombre) {
     var puede = puedeCapturar(r.tipo) && r.estatus !== 'Cancelado';
     var input = h('input', { type: 'file', accept: '.pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png', class: 'oculto',
-      onchange: function () { if (input.files[0]) subirArchivo(r, clase, input.files[0]).then(function () { abrirDetalle(r.id); cargarListaSiAplica(r.tipo); }).catch(fallo); } });
+      onchange: function () { if (input.files[0]) subirArchivo(r, clase, input.files[0]).then(function (res) { trasCambio(res, r.id); cargarListaSiAplica(r.tipo); }).catch(fallo); } });
     var botones = [];
     if (tiene) {
       botones.push(h('button', { class: 'btn btn--chico', onclick: function () { verArchivo(r, clase); } }, icono('bajar'), 'Abrir'));
@@ -863,7 +1006,7 @@
         botones.push(h('button', { class: 'btn btn--chico btn--fantasma', onclick: function () { input.click(); } }, 'Reemplazar'));
         botones.push(h('button', { class: 'icono-btn', title: 'Quitar', 'aria-label': 'Quitar archivo', onclick: function () {
           confirmar('¿Quitar «' + nombre + '» de este registro?\nQueda 30 días en la papelera de Drive del dueño.', { si: 'Quitar', peligro: true }).then(function (s) {
-            if (s) llamar('quitarArchivo', { id: r.id, clase: clase }).then(function () { aviso('Archivo quitado.', 'ok'); abrirDetalle(r.id); cargarListaSiAplica(r.tipo); }).catch(fallo);
+            if (s) llamar('quitarArchivo', { id: r.id, clase: clase }).then(function (res) { aviso('Archivo quitado.', 'ok'); trasCambio(res, r.id); cargarListaSiAplica(r.tipo); }).catch(fallo);
           });
         } }, icono('papelera')));
       }
@@ -900,7 +1043,7 @@
     }).catch(fallo);
   }
 
-  function cargarListaSiAplica(t) { if (E.vista === 'libreta' && E.tipo === t) cargarLista(); }
+  function cargarListaSiAplica(t) { if (E.vista === 'libreta' && E.tipo === t) cargarLista({ silencioso: true }); }
 
   function cancelarRegistro(r) {
     var motivo = h('textarea', { class: 'entrada', rows: 3, maxlength: 500, placeholder: 'Ej.: se capturó dos veces; el oficio no se envió…' });
@@ -908,8 +1051,8 @@
       cuerpo: [h('div', { class: 'alerta alerta--aviso' }, 'El registro no se borra: queda marcado como cancelado y su número no se vuelve a usar.'), campo('Motivo', motivo, { req: true })],
       pie: [h('button', { class: 'btn', onclick: function () { v.cerrar(); } }, 'No cancelar'),
         h('button', { class: 'btn btn--peligro-lleno', onclick: function () {
-          llamar('cancelar', { id: r.id, version: r.version, motivo: motivo.value }).then(function () {
-            v.cerrar(); aviso('Registro cancelado.', 'ok'); abrirDetalle(r.id); cargarListaSiAplica(r.tipo);
+          llamar('cancelar', { id: r.id, version: r.version, motivo: motivo.value }).then(function (res) {
+            v.cerrar(); aviso('Registro cancelado.', 'ok'); trasCambio(res, r.id); cargarListaSiAplica(r.tipo);
           }).catch(fallo);
         } }, 'Cancelar registro')] });
   }
@@ -1156,18 +1299,19 @@
       if (confirmarDuplicado) d.confirmarDuplicado = true;
       boton.disabled = true; boton.textContent = 'Guardando…';
       llamar('guardar', d).then(function (res) {
-        var r = res.registro;
+        var r = res.registro, ultimo = res;
+        var anotar = function (x) { if (x && x.registro) ultimo = x; };   // la última respuesta trae el registro y su detalle al día
         var subidas = Promise.resolve();
-        if (nuevo && fDoc.files[0]) subidas = subidas.then(function () { return subirArchivo(r, 'oficio', fDoc.files[0]); });
-        if (nuevo && fAcu.files[0]) subidas = subidas.then(function () { return subirArchivo(r, 'acuse', fAcu.files[0]); });
+        if (nuevo && fDoc.files[0]) subidas = subidas.then(function () { return subirArchivo(r, 'oficio', fDoc.files[0]).then(anotar); });
+        if (nuevo && fAcu.files[0]) subidas = subidas.then(function () { return subirArchivo(r, 'acuse', fAcu.files[0]).then(anotar); });
         return subidas.catch(function (e) { aviso('El registro se guardó, pero el archivo no: ' + e.message, 'error'); }).then(function () {
           v.antesDeCerrar = null; v.cerrar();
           if (res.sinCambios) aviso('No había cambios que guardar.');
           else aviso((nuevo ? 'Registrado: ' : 'Guardado: ') + def.singular + ' ' + etiquetaNum(r) + (r.numero && def.numeroAuto ? ' · ' + r.numero : ''), 'ok');
           if (nuevo && E.anio === E.ini.anioActual) E.ini.conteos[t] = (E.ini.conteos[t] || 0) + 1;
-          if (E.vista === 'libreta') cargarLista();
-          else if (E.vista === 'pendientes') irA('pendientes', null, { sinHistorial: true });
-          abrirDetalle(r.id);
+          if (E.vista === 'pendientes') irA('pendientes', null, { sinHistorial: true });
+          trasCambio(ultimo, r.id);
+          if (E.vista === 'libreta') cargarLista({ silencioso: true });
         });
       }).catch(function (e) {
         boton.disabled = false; boton.textContent = nuevo ? (def.numeroAuto ? 'Guardar y asignar número' : 'Guardar') : 'Guardar cambios';
@@ -1313,11 +1457,22 @@
     var cont = h('div', { class: 'pend' }, h('div', { class: 'tarjeta vacio' }, 'Cargando…'));
     marco('pendientes').appendChild(h('div', null, h('div', { class: 'titulo-vista' }, h('h1', null, 'Pendientes'),
       h('span', { class: 'sub' }, 'Lo que está por atender y los oficios que salieron sin acuse')), cont));
-    llamar('pendientes').then(function (p) {
+    var gen = E.gen;
+    if (E.pend) pintar(E.pend.datos);   // lo de la visita anterior, al instante
+    llamar('pendientes', null, E.pend ? { silencioso: true } : null).then(function (p) {
+      if (gen !== E.gen) return;
+      var firma = JSON.stringify(p), cambio = !E.pend || E.pend.firma !== firma;
+      E.pend = { datos: p, firma: firma };
+      if (cambio && cont.isConnected) pintar(p);
+    }).catch(function (e) {
+      if (E.pend) return;
+      fallo(e); vaciar(cont).appendChild(h('div', { class: 'tarjeta vacio' }, e.message));
+    });
+    function pintar(p) {
       vaciar(cont);
       function item(r, conPersona) {
         var per = lineas(r.tipo === 'OFS' ? r.dirigido_a : r.firma).primera;
-        return h('div', { class: 'pend__i', tabindex: '0', onclick: function () { abrirDetalle(r.id); }, onkeydown: function (ev) { if (ev.key === 'Enter') abrirDetalle(r.id); } },
+        return h('div', { class: 'pend__i', tabindex: '0', onclick: function () { abrirDetalle(r.id, r); }, onkeydown: function (ev) { if (ev.key === 'Enter') abrirDetalle(r.id, r); } },
           h('div', null, h('div', { class: 't-num' }, etiquetaNum(r)), h('div', { class: 'pend__tipo' }, tipoDef(r.tipo).singular)),
           h('div', null, h('div', null, r.asunto || 'Sin asunto'), h('div', { class: 'item__meta' }, [r.numero, conPersona ? per : null, r.turnado_a ? 'Turnado a: ' + r.turnado_a : null, fechaCorta(r.fecha_recepcion || r.fecha)].filter(Boolean).join(' · '))),
           h('div', { style: { display: 'grid', gap: '4px', justifyItems: 'end' } }, r.estatus ? insEstatus(r.estatus) : null, insVence(r)));
@@ -1329,7 +1484,7 @@
       cont.appendChild(h('section', { class: 'tarjeta' }, h('h2', null, icono('archivo'), 'Oficios salientes sin acuse', h('span', { class: 'ins' }, p.sinAcuse.length)),
         p.sinAcuse.length ? p.sinAcuse.slice(0, limite).map(function (r) { return item(r, true); }) : h('div', { class: 'vacio' }, 'Todos los oficios tienen acuse.'),
         p.sinAcuse.length > limite ? h('div', { class: 'vacio' }, 'Y ' + (p.sinAcuse.length - limite) + ' más. En Registros filtra «Sin acuse».') : null));
-    }).catch(function (e) { fallo(e); vaciar(cont).appendChild(h('div', { class: 'tarjeta vacio' }, e.message)); });
+    }
   };
 
   /* ───────────────────────── Directorio ───────────────────────── */
@@ -1530,10 +1685,9 @@
   };
 
   /* ───────────────────────── Arranque ───────────────────────── */
-  llamar('estado').then(function (p) {
-    E.publico = p;
-    if (E.token) cargarInicio(); else pantallaEntrar();
-  }).catch(function (e) {
+  // Con sesión abierta (al recargar), el portal se pide directo, sin esperar los encabezados públicos.
+  if (E.token) cargarInicio();
+  else estadoPublico().then(function () { pantallaEntrar(); }).catch(function (e) {
     vaciar(app).appendChild(h('div', { class: 'arranque' }, h('div', { class: 'arranque__marca' }, 'Control de Gestión'),
       h('div', { class: 'alerta alerta--error', style: { maxWidth: '520px' } }, e.message)));
   });

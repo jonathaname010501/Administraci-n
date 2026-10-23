@@ -211,6 +211,6 @@ La URL `/exec` **no cambia**, así que no hay que tocar Vercel.
 ## Probar en tu computadora (opcional)
 
 ```bash
-npm test                     # 31 pruebas (24 necesitan base/base.json del zip)
+npm test                     # 37 pruebas (29 necesitan base/base.json del zip)
 npm run local                # la app con la base migrada en http://localhost:4321
 ```

@@ -9,6 +9,12 @@
 //  · POST /__run      → llama la función pública del servidor (las privadas,
 //                       las que terminan en _, se rechazan como en Google).
 //  · GET  /__admin    → usuario y contraseña temporal que dio instalar().
+//
+//  CG_RETRASO_MS=1200  cada respuesta tarda eso (como Apps Script de verdad),
+//                      para ver cuánto espera la persona en cada pantalla.
+//  CG_SIMULAR_121=1    se porta como el servidor 1.2.1 (sin precarga ni
+//                      detalle en las respuestas): la página nueva debe
+//                      funcionar igual si se publica antes que el servidor.
 // ════════════════════════════════════════════════════════════════════════
 const http = require("node:http");
 const fs = require("node:fs");
@@ -32,6 +38,17 @@ if (process.env.CG_SIMULAR_VIEJO === "1") {
   e.ctx.ACCIONES_.inicio.fn = (yo, d, t) => { const r = inicioReal(yo, d, t); delete r.indicadores; r.version = "1.0.0"; return r; };
   delete e.ctx.ACCIONES_.indicadores;
 }
+if (process.env.CG_SIMULAR_121 === "1") {
+  delete e.ctx.ACCIONES_.listarTodo;
+  const apiReal = e.ctx.api;
+  e.ctx.api = (t, a, d) => {
+    const r = apiReal(t, a, d);
+    if (r && r.ok && r.datos && typeof r.datos === "object" && !Array.isArray(r.datos)) { delete r.datos.inicio; delete r.datos.detalle; }
+    return r;
+  };
+}
+const RETRASO = Number(process.env.CG_RETRASO_MS || 0);
+const despues = (f) => (RETRASO ? setTimeout(f, RETRASO) : f());
 e.estado.url = `http://localhost:${PUERTO}/`;
 
 const FUENTES = path.join(__dirname, "fuentes");
@@ -88,8 +105,10 @@ http.createServer((req, res) => {
     req.on("data", (c) => (cuerpo += c));
     req.on("end", () => {
       const r = e.post(cuerpo);
-      res.writeHead(200, { "Content-Type": r.mime, "Access-Control-Allow-Origin": "*" });
-      res.end(JSON.stringify(r.json));
+      despues(() => {
+        res.writeHead(200, { "Content-Type": r.mime, "Access-Control-Allow-Origin": "*" });
+        res.end(JSON.stringify(r.json));
+      });
     });
     return;
   }
@@ -104,8 +123,10 @@ http.createServer((req, res) => {
       } catch (err) {
         r = { ok: false, error: err.message };
       }
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify(r));
+      despues(() => {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify(r));
+      });
     });
     return;
   }

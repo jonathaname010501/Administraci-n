@@ -124,8 +124,38 @@ tipografías de Google Fonts.
   registro usa 33. Hay espacio para décadas.
 - Escaneos: hasta **10 MB** cada uno. El Drive gratuito tiene 15 GB, compartidos con
   el Gmail de esa cuenta: unos 40,000 escaneos de 300 KB.
-- Apps Script: cada acción tarda de 1 a 2 segundos y la primera carga del día, unos
-  segundos más. Aguanta a todo el equipo trabajando al mismo tiempo.
+- Apps Script: cada llamada al servidor tarda de 1 a 2 segundos y la primera del día,
+  unos segundos más. Por eso la app evita esperas (ver "Velocidad"). Aguanta a todo
+  el equipo trabajando al mismo tiempo.
+
+## Velocidad
+
+Cada vuelta a Google tarda de 1 a 2 segundos y eso no se puede cambiar, así que la
+app hace las menos vueltas posibles y no hace esperar cuando ya tiene los datos:
+
+- **Al entrar**, la misma respuesta trae el portal. Mientras la persona ve el portal,
+  se traen en segundo plano las listas del año de sus libretas y Pendientes. Al abrir
+  una libreta, ya se ve; si alguien más capturó algo, aparece un segundo después.
+- **Al abrir un oficio**, el panel sale al instante con lo que ya se ve en la lista;
+  archivos e historial llegan después. Editar se activa cuando llega todo.
+- **Al guardar**, cancelar o subir un archivo, la respuesta ya trae el panel completo
+  y la lista se actualiza sin pedirla otra vez.
+- **En el servidor**, la hoja se abre una sola vez por llamada y el historial de un
+  oficio busca solo sus renglones en la bitácora (no la lee completa, que crece todos
+  los días).
+- Lo que se guarda en memoria es **solo de esa pestaña** y se borra al salir o al
+  cambiar de usuario. Nada se guarda en el disco del equipo.
+
+Con un retraso simulado de 1.5 s por llamada (`CG_RETRASO_MS=1500 npm run local`):
+
+| Paso | 1.2.1 | 1.3.0 |
+|---|---|---|
+| Entrar hasta ver el portal | 3.4 s | 1.9 s |
+| Abrir una libreta | 1.9 s | 0.1 s |
+| Abrir un oficio | 1.9 s | 0.1 s (completo en 1.8 s) |
+| Guardar cambios y ver el oficio | 3.7 s | 2.0 s |
+| Abrir Pendientes | 1.9 s | 0.2 s |
+| Recargar la página con sesión abierta | 3.6 s | 2.0 s |
 
 ## Qué se migró del Minutario 2026
 
@@ -181,8 +211,10 @@ corre en Vercel (`doPost` en Servidor.gs). Las dos rutas pasan por la misma `api
 **Pruebas** (necesitas Node 20 o más; Python 3 con openpyxl para la del Excel):
 
 ```bash
-npm test               # 34 pruebas: seguridad, permisos, consecutivos, archivos, Excel, armado web…
+npm test               # 37 pruebas: seguridad, permisos, consecutivos, archivos, Excel, armado web, velocidad…
 npm run local          # la app en http://localhost:4321 con la base migrada
+                       #   CG_RETRASO_MS=1500 → cada llamada tarda como en Google
+                       #   CG_SIMULAR_121=1   → servidor sin lo nuevo (la página debe seguir funcionando)
 npm run web            # arma dist/ (necesita CG_API_URL)
 ```
 

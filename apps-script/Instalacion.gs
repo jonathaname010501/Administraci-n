@@ -18,6 +18,7 @@
  */
 
 function instalar() {
+  nuevaPeticion_();
   soloDueno_();
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   if (!ss) throw new Error('Abre este proyecto desde la hoja (Extensiones → Apps Script) y corre instalar() desde ahí.');
@@ -70,6 +71,7 @@ function instalar() {
 }
 
 function restablecerAdministrador() {
+  nuevaPeticion_();
   soloDueno_();
   var t = tabla_(HOJAS.USR);
   var f = t.filas.filter(function (x) { return x.o.rol === 'admin'; })[0];
@@ -96,6 +98,7 @@ function restablecerAdministrador() {
 }
 
 function revisarSeguridad() {
+  nuevaPeticion_();
   soloDueno_();
   var log = ['Revisión de seguridad · ' + sello_(new Date()), ''];
   revisar_(log);
@@ -104,6 +107,7 @@ function revisarSeguridad() {
 }
 
 function respaldoSemanal() {
+  nuevaPeticion_();
   // Pública a propósito (la llama el disparador). Si alguien la llama desde
   // fuera, lo más que logra es una copia por semana en la carpeta privada.
   var props = PropertiesService.getScriptProperties();
