@@ -10,9 +10,9 @@
 //                       las que terminan en _, se rechazan como en Google).
 //  · GET  /__admin    → usuario y contraseña temporal que dio instalar().
 //
-//  CG_RETRASO_MS=1200  cada respuesta tarda eso (como Apps Script de verdad),
+//  CG_RETRASO_MS=1500  cada respuesta tarda eso (como Apps Script de verdad),
 //                      para ver cuánto espera la persona en cada pantalla.
-//  CG_SIMULAR_121=1    se porta como el servidor 1.2.1 (sin precarga ni
+//  CG_SIMULAR_150=1    se porta como el servidor 1.5.0 (sin precarga ni
 //                      detalle en las respuestas): la página nueva debe
 //                      funcionar igual si se publica antes que el servidor.
 // ════════════════════════════════════════════════════════════════════════
@@ -38,12 +38,15 @@ if (process.env.CG_SIMULAR_VIEJO === "1") {
   e.ctx.ACCIONES_.inicio.fn = (yo, d, t) => { const r = inicioReal(yo, d, t); delete r.indicadores; r.version = "1.0.0"; return r; };
   delete e.ctx.ACCIONES_.indicadores;
 }
-if (process.env.CG_SIMULAR_121 === "1") {
+if (process.env.CG_SIMULAR_150 === "1") {
   delete e.ctx.ACCIONES_.listarTodo;
   const apiReal = e.ctx.api;
   e.ctx.api = (t, a, d) => {
     const r = apiReal(t, a, d);
-    if (r && r.ok && r.datos && typeof r.datos === "object" && !Array.isArray(r.datos)) { delete r.datos.inicio; delete r.datos.detalle; }
+    if (r && r.ok && r.datos && typeof r.datos === "object" && !Array.isArray(r.datos)) {
+      delete r.datos.inicio; delete r.datos.detalle;
+      if (a === "inicio" && Array.isArray(r.datos.acciones)) r.datos.acciones = r.datos.acciones.filter((x) => x !== "listarTodo");
+    }
     return r;
   };
 }
@@ -77,7 +80,8 @@ function pagina() {
   if (fs.existsSync(FUENTES)) {
     html = html.replace(/<link href="https:\/\/fonts\.googleapis\.com[^>]+>/, '<link rel="stylesheet" href="/__fuentes/fuentes.css">');
   }
-  return html.replace("<head>", "<head>" + SHIM);
+  // Google agrega la etiqueta viewport (addMetaTag en doGet); aquí también, para probar en celular.
+  return html.replace("<head>", '<head><meta name="viewport" content="width=device-width, initial-scale=1">' + SHIM);
 }
 
 http.createServer((req, res) => {

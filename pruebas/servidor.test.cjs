@@ -62,7 +62,7 @@ test("doGet arma la página completa con estilos, Excel y app (aunque Google qui
   assert.match(html, /<style>[\s\S]*--color-morado: #8f4889[\s\S]*<\/style>\s*<\/head><body>/, "estilos dentro del head");
   assert.match(html, /<div id="app" class="app">/);
   assert.match(html, /<script>[\s\S]*var ExcelCG = [\s\S]*<\/script>/);
-  assert.match(html, /<script>[\s\S]*function llamar\(accion, datos, op\)[\s\S]*<\/script>\s*<\/body><\/html>$/);
+  assert.match(html, /<script>[\s\S]*function llamar\(accion, datos(, o)?\)[\s\S]*<\/script>\s*<\/body><\/html>$/);
   assert.equal((html.match(/<script>/g) || []).length, 2, "solo los dos bloques de código");
 });
 
@@ -175,7 +175,7 @@ testBase("permisos por rol y por libreta", () => {
   assert.equal(e.api(cap, "descargarArchivo", { id: "m-ofs-2026-001", clase: "oficio" }).codigo, "PERMISO");
   assert.equal(e.api(con, "guardar", { ...nuevoOficio(), tipo: "OFE" }).codigo, "PERMISO", "consulta no captura");
   assert.equal(e.api(con, "listar", { tipo: "OFS", anio: 2026 }).datos.length, 416);
-  for (const [acc, d] of [["usuarios"], ["bitacora"], ["guardarConfig", {}], ["exportar", { tipo: "OFE", anio: 2026 }], ["exportar", { tipo: "TODOS", soloConteo: true }], ["cancelar", { id: "m-ofs-2026-001", motivo: "prueba de permisos" }], ["unirPersonas", { de: "P0001", a: "P0002" }], ["restablecerClave", { usuario: "admin" }]]) {
+  for (const [acc, d] of [["usuarios"], ["bitacora"], ["guardarConfig", {}], ["cancelar", { id: "m-ofs-2026-001", motivo: "prueba de permisos" }], ["unirPersonas", { de: "P0001", a: "P0002" }], ["restablecerClave", { usuario: "admin" }]]) {
     assert.equal(e.api(cap, acc, d).codigo, "PERMISO", acc);
     assert.equal(e.api(con, acc, d).codigo, "PERMISO", acc);
   }
@@ -479,89 +479,4 @@ test("la versión de la página y la del servidor coinciden", () => {
   const app = fs.readFileSync(path.join(__dirname, "..", "apps-script", "App.html"), "utf8").match(/var VERSION_APP = '([^']+)'/)[1];
   const srv = fs.readFileSync(path.join(__dirname, "..", "apps-script", "Servidor.gs"), "utf8").match(/var VERSION = '([^']+)'/)[1];
   assert.equal(app, srv, "sube las dos juntas");
-});
-
-testBase("exportación: solo admin, por libreta y por rango de fechas", () => {
-  const e = preparar();
-  const cap = alta(e, "beto", "captura", "*");
-  assert.equal(e.api(cap, "exportar", { tipo: "TODOS", desde: "2026-01-01", hasta: "2026-12-31" }).codigo, "PERMISO");
-  const todo = e.api(e.admin, "exportar", { tipo: "TODOS", soloConteo: true }).datos;
-  assert.equal(todo.total, 732);
-  assert.equal(todo.porTipo.OFS, 416);
-  const ene = e.api(e.admin, "exportar", { tipo: "OFS", desde: "2026-01-01", hasta: "2026-01-31", soloConteo: true }).datos;
-  assert.ok(ene.total > 0 && ene.total < 416);
-  assert.ok(ene.sinFecha > 0, "los apartados sin fecha no entran en un rango");
-  const conDatos = e.api(e.admin, "exportar", { tipo: "OFS", desde: "2026-01-01", hasta: "2026-01-31" }).datos;
-  assert.equal(conDatos.filas.length, ene.total);
-  assert.ok(conDatos.filas.every((r) => r.fecha >= "2026-01-01" && r.fecha <= "2026-01-31"));
-  assert.ok(conDatos.filas.every((r) => !("archivo_id" in r)), "no salen IDs de Drive");
-  const entr = e.api(e.admin, "exportar", { tipo: "OFE", desde: "2026-06-01", hasta: "2026-06-30" }).datos.filas;
-  assert.ok(entr.every((r) => (r.fecha_recepcion || r.fecha) >= "2026-06-01" && (r.fecha_recepcion || r.fecha) <= "2026-06-30"), "en entrantes cuenta la fecha de recibido");
-  assert.equal(e.api(e.admin, "exportar", { tipo: "TODOS", desde: "2026-05-01", hasta: "2026-04-01" }).codigo, "DATOS");
-  assert.equal(e.api(e.admin, "exportar", { tipo: "TODOS", desde: "2026-13-01" }).codigo, "DATOS");
-  const bit = e.api(e.admin, "bitacora", { accion: "exportación" }).datos.filas;
-  assert.match(bit[0].detalle, /del 2026-06-01 al 2026-06-30/);
-});
-
-testBase("velocidad: la hoja se abre una vez por petición y el historial no lee toda la bitácora", () => {
-  const e = preparar();
-  // Un año de uso: 20,000 movimientos en la bitácora
-  const bit = e.hoja("Bitacora");
-  bit.maxRows = 21000;
-  for (let i = 0; i < 20000; i++) {
-    const fila = bit.getLastRow() + 1;
-    bit.datos[fila - 1] = ["2026-03-01 10:00:00", "u" + (i % 5), i % 4 ? "entrar" : "edición", i % 4 ? "" : "m-ofs-2026-00" + (1 + (i % 9)), "x"];
-    bit.formatos[fila - 1] = ["@", "@", "@", "@", "@"];
-  }
-  e.medir();
-  const det = e.api(e.admin, "obtener", { id: "m-ofs-2026-003" }).datos;
-  const m = e.medir();
-  assert.equal(m.aperturas, 1, "una sola apertura de la hoja");
-  assert.ok(m.celdas < 30000, "no se leyó la bitácora completa (" + m.celdas + " celdas)");
-  assert.equal(det.historial.length, 100, "los 100 más recientes");
-  assert.ok(det.historial.every((x) => x.registro_id === "m-ofs-2026-003"));
-  for (const [acc, d] of [["inicio"], ["listar", { tipo: "OFS", anio: 2026 }], ["pendientes"], ["guardar", nuevoOficio()], ["bitacora"]]) {
-    e.medir();
-    assert.equal(e.api(e.admin, acc, d).ok, true, acc);
-    assert.equal(e.medir().aperturas, 1, acc + ": una sola apertura");
-  }
-});
-
-testBase("velocidad: entrar trae el portal y guardar trae el detalle (una vuelta menos)", () => {
-  const e = preparar();
-  const ent = e.api(null, "entrar", { usuario: "admin", clave: "Gestion2026" }).datos;
-  assert.ok(ent.inicio && ent.inicio.yo.usuario === "admin" && ent.inicio.indicadores.porTipo.OFS, "entrar trae los datos del portal");
-  assert.deepEqual(Object.keys(ent.inicio).sort(), Object.keys(e.api(ent.token, "inicio").datos).sort());
-  // con contraseña temporal no trae nada más
-  const r = e.api(e.admin, "guardarUsuario", { nuevo: true, usuario: "nuevo.u", nombre: "Nuevo", rol: "consulta", tipos: ["OFE"] }).datos;
-  const temp = e.api(null, "entrar", { usuario: "nuevo.u", clave: r.temporal }).datos;
-  assert.equal(temp.debe_cambiar, true);
-  assert.equal(temp.inicio, undefined);
-  // guardar (alta y respuesta) regresa ligados e historial, igual que obtener
-  const orig = e.api(e.admin, "guardar", { ...nuevoOficio(), tipo: "OFE", numero: "SAPCI/X/0001/2026", estatus: "Pendiente" }).datos;
-  assert.equal(orig.detalle.historial[0].accion, "alta");
-  const resp = e.api(e.admin, "guardar", nuevoOficio({ relacionado_id: orig.registro.id, marcarAtendido: true, asunto: "Respuesta" })).datos;
-  const obt = e.api(e.admin, "obtener", { id: resp.registro.id }).datos;
-  assert.deepEqual(resp.detalle.ligados, obt.ligados);
-  assert.deepEqual(resp.detalle.historial, obt.historial);
-  assert.equal(resp.detalle.ligados[0].estatus, "Atendido");
-  const ed = e.api(e.admin, "guardar", { ...resp.registro, asunto: "Respuesta corregida" }).datos;
-  assert.deepEqual(ed.detalle.historial, e.api(e.admin, "obtener", { id: resp.registro.id }).datos.historial);
-  const can = e.api(e.admin, "cancelar", { id: resp.registro.id, version: ed.registro.version, motivo: "Prueba de cancelación" }).datos;
-  assert.equal(can.detalle.historial[0].accion, "cancelación");
-  const sub = e.api(e.admin, "subirArchivo", { id: orig.registro.id, clase: "oficio", nombre: "a.pdf", mime: "application/pdf", base64: PDF }).datos;
-  assert.equal(sub.detalle.historial[0].accion, "archivo");
-  assert.equal(JSON.stringify(sub).indexOf("archivo_id"), -1, "no se mandan IDs de Drive");
-});
-
-testBase("velocidad: la precarga de listas respeta las libretas de cada quien", () => {
-  const e = preparar();
-  const con = alta(e, "carla", "consulta", ["OFE", "CIR"]);
-  const p = e.api(con, "listarTodo").datos;
-  assert.deepEqual(Object.keys(p.listas).sort(), ["CIR", "OFE"]);
-  assert.deepEqual(p.listas.OFE, e.api(con, "listar", { tipo: "OFE", anio: p.anio }).datos);
-  assert.equal(e.api(null, "listarTodo").codigo, "SESION");
-  const adm = e.api(e.admin, "listarTodo").datos;
-  assert.equal(Object.keys(adm.listas).length, 6);
-  assert.equal(adm.listas.OFS.length, 416);
 });

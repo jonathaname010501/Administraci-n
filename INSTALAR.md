@@ -145,51 +145,98 @@ Si quieres un dominio propio: Vercel → Settings → Domains.
 
 # Parte C · Publicar cambios
 
-| Si cambias… | Qué haces |
-|---|---|
-| Pantallas o estilos (`App.html`, `Estilos.html`, `Excel.html`, `Index.html`) | `git push`. Vercel publica solo en 1 minuto. |
-| El servidor (`Servidor.gs`, `Instalacion.gs`) | clasp (abajo) o pegarlo a mano en el editor, y luego publicar una versión nueva **en la misma implementación**. |
+El sistema tiene dos lados y los dos deben quedar al día:
 
-Conviene que el proyecto de Apps Script también tenga las pantallas al día; con clasp
-se sube todo junto.
+| Lado | Dónde vive | Cómo se actualiza |
+|---|---|---|
+| **Servidor** (`Servidor.gs`, `Instalacion.gs`, y una copia de las pantallas) | Google Apps Script | Se sube el código y se publica una **versión nueva en la misma implementación** (la URL `/exec` no cambia). |
+| **Página** (`App.html`, `Estilos.html`, `Excel.html`, `Index.html`) | Vercel | Sola, cada vez que haces `git push` (tarda 1 o 2 minutos). |
 
-## C1 · Configurar clasp (una sola vez)
+Lo más fácil es el comando **`npm run publicar`**, que hace todo en orden (C1 y C2).
+Si no tienes clasp, puedes hacerlo a mano (C3).
 
-clasp es la herramienta oficial de Google para subir código a Apps Script desde tu computadora.
+## C1 · Preparar tu computadora (una sola vez)
 
-1. `npm install -g @google/clasp`
-2. Activa la API: https://script.google.com/home/usersettings → **API de Google Apps Script: Activado**.
-3. `clasp login` → entra con la **cuenta dueña**.
+Abre una terminal **en la carpeta del proyecto** (en Windows: abre la carpeta
+`control-gestion` en el Explorador, escribe `cmd` en la barra de dirección y presiona
+Enter; también sirve PowerShell o Git Bash).
+
+1. **clasp** (la herramienta oficial de Google para subir código a Apps Script):
+
+   ```bash
+   npm install -g @google/clasp
+   ```
+
+2. Activa la API una vez: entra a https://script.google.com/home/usersettings con la
+   **cuenta dueña** → **API de Google Apps Script: Activado**.
+3. Inicia sesión con la **cuenta dueña** (se abre el navegador; acepta los permisos):
+
+   ```bash
+   clasp login
+   ```
+
 4. En el editor de Apps Script: **⚙ Configuración del proyecto → ID de la secuencia de
    comandos** → cópialo.
-5. En la carpeta del proyecto, copia `.clasp.json.ejemplo` como `.clasp.json` y pega
-   el ID. Este archivo no se sube a GitHub.
-6. `npm run servidor:implementaciones` → copia el ID de la implementación de la
-   aplicación web, la que dice `Versión 1`, **no** la `@HEAD`.
+5. En la carpeta del proyecto, copia `.clasp.json.ejemplo` con el nombre `.clasp.json`
+   y pega el ID donde dice `PEGA_AQUI…`. Este archivo no se sube a GitHub.
+6. Ten listo el repositorio de GitHub (Parte B1). `npm run publicar` usa el mismo `git push`.
 
-## C2 · Cada vez que cambies el servidor
+> 🔒 `clasp login` guarda una llave en tu computadora (`.clasprc.json`, en tu carpeta
+> de usuario) que da acceso al Drive de la cuenta dueña. No la compartas ni la subas a
+> GitHub. Por eso el servidor **no** se publica solo desde GitHub: esa llave tendría
+> que vivir en GitHub.
+
+## C2 · Publicar un cambio: `npm run publicar`
+
+En la terminal, dentro de la carpeta del proyecto, escribe el comando con una frase
+corta que diga qué cambió (entre comillas):
 
 ```bash
-npm test                                   # que todo pase
-npm run servidor:subir                     # sube los archivos de apps-script/
-clasp update-deployment ID_DE_IMPLEMENTACION -d "Descripción del cambio"
+npm run publicar -- "Varios destinatarios y Mis asuntos"
 ```
 
-La URL `/exec` **no cambia**, así que no hay que tocar Vercel.
+> En PowerShell también funciona sin los dos guiones: `npm run publicar "Varios destinatarios"`.
 
-> ⚠️ `clasp push` reemplaza **todos** los archivos del proyecto en línea con los de
-> tu carpeta `apps-script/`. Eso está bien: así no quedan copias viejas (por ejemplo
-> un `Servidor.gs.gs` que se haya creado a mano).
+**La primera vez** te muestra las implementaciones del proyecto y te pide el ID de la
+que usa la app. Copia el que empieza con `AKfyc` y dice **«Versión…»** (no el que dice
+**@HEAD**), pégalo y presiona Enter. Se guarda en `.publicar.json` (tampoco va a
+GitHub) y ya no te lo vuelve a pedir.
 
-> 🔒 `clasp login` guarda una llave en tu computadora (`.clasprc.json`, en tu
-> carpeta de usuario) que da acceso al Drive de la cuenta dueña. No la compartas ni
-> la subas a GitHub. Por eso el servidor **no** se publica automáticamente desde
-> GitHub: esa llave tendría que vivir en GitHub.
+El comando hace esto, en orden, y **se detiene en el primer paso que falle**,
+explicando qué hacer:
+
+| Paso | Qué hace | Si falla… |
+|---|---|---|
+| Antes de empezar | Revisa que exista `.clasp.json`, que clasp tenga sesión, el ID de la implementación, git, que `.gitignore` proteja los datos y que no haya archivos de datos por subir (lo mismo que el paso 5). | No se toca nada. |
+| 1 · Pruebas | Corre `npm test`. | No se publica nada. |
+| 2 · Versiones | Revisa que `VERSION` (Servidor.gs) y `VERSION_APP` (App.html) sean iguales. | No se publica nada. |
+| 3 · Subir código | `clasp push --force`: sube los archivos de `apps-script/` al proyecto de Apps Script. **Todavía nadie lo ve.** | La app sigue igual que antes. |
+| ⚠ Columnas nuevas | Si la versión agrega columnas a la hoja, **se detiene y te pide correr `instalar()`** (ver abajo). | La app sigue igual que antes. |
+| 4 · Publicar | `clasp update-deployment <ID> -d "tu mensaje"`: crea la versión nueva **en la misma implementación**. Desde aquí la gente usa el servidor nuevo. | La app sigue con la versión anterior. |
+| 5 · Revisar git | Comprueba que **solo** se suba código y documentación. Si aparece cualquier otro archivo nuevo (un escaneo PDF, una foto, un Excel, un `.json` exportado, `base/`, `capturas/`, llaves…), se detiene y te dice cuál es. | Se detiene antes de subir. |
+| 6 · GitHub | `git add`, `git commit -m "tu mensaje"` y `git push`. Vercel publica la página sola. | El servidor ya quedó; solo falta GitHub (te dice cómo). |
+
+**Cuando hay columnas nuevas** (el comando lo avisa con ⚠), después del paso 3:
+
+1. Abre la hoja → **Extensiones → Apps Script**.
+2. A la izquierda abre **`Instalacion.gs`**, elige **`instalar`** arriba y presiona **▶ Ejecutar**.
+3. Cuando el registro diga **✔ Todo en orden**, regresa a la terminal y contesta **s**.
+
+Mientras tanto la app que usa la gente sigue funcionando con la versión anterior.
+Si nadie puede contestar la pregunta (por ejemplo, desde un programa), agrega
+`--ya-corri-instalar` al final del comando.
+
+> ⚠️ `clasp push` reemplaza **todos** los archivos del proyecto en línea con los de tu
+> carpeta `apps-script/`. Eso está bien: así no quedan copias viejas (por ejemplo un
+> `Servidor.gs.gs` creado a mano). No edites el código directamente en el editor de
+> Google si usas este comando: lo que cambies allá se pierde en el siguiente push.
 
 ## C3 · Sin clasp (a mano)
 
 1. Pega los archivos cambiados en el editor y guarda.
-2. **Implementar → Gestionar implementaciones → ✏** → Versión: **Nueva versión** → **Implementar**.
+2. Si la versión agrega columnas: corre **`instalar()`** (Instalacion.gs → ▶ Ejecutar).
+3. **Implementar → Gestionar implementaciones → ✏** → Versión: **Nueva versión** → **Implementar**.
+4. En tu computadora: `git add -A`, `git commit -m "qué cambió"` y `git push` (Vercel publica la página).
 
 ⚠️ No uses "Nueva implementación": crea **otra URL** y habría que cambiar `CG_API_URL` en Vercel.
 
@@ -206,11 +253,13 @@ La URL `/exec` **no cambia**, así que no hay que tocar Vercel.
 | Se olvidó la contraseña del administrador | Editor → `restablecerAdministrador` → copia la nueva del registro. |
 | Una persona quedó bloqueada | Usuarios → Editar → Desbloquear (o espera 15 min). |
 | ¿Algo quedó compartido? | Editor → `revisarSeguridad`. |
+| El volante sale en una hoja carta con mucho espacio | En el cuadro de impresión elige papel «Media carta» / 5.5 × 8.5 in si tu impresora lo tiene, o déjalo en carta: el volante ocupa la mitad de arriba. Usa «Tamaño real» o «100 %». |
 | La primera acción del día tarda unos segundos | Normal en Apps Script cuando nadie la ha usado en un rato. |
+| Nadie puede entrar y dice «Sistema en mantenimiento» | Un administrador lo prendió: Configuración → Modo mantenimiento → Apagar. Si ningún admin puede entrar, en la hoja, pestaña **Config**, cambia `mantenimiento` a `NO` (tarda hasta 1 minuto). |
 
 ## Probar en tu computadora (opcional)
 
 ```bash
-npm test                     # 37 pruebas (29 necesitan base/base.json del zip)
+npm test                     # 69 pruebas (32 necesitan base/base.json del zip)
 npm run local                # la app con la base migrada en http://localhost:4321
 ```

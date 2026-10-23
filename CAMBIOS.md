@@ -3,6 +3,43 @@
 Cada versión dice qué hay que hacer al publicarla. Si usas `npm run publicar`, el
 comando hace casi todo y te avisa lo que falta (ver INSTALAR.md, Parte C).
 
+## 1.6.0 · Exportación solo para administradores, paleta del manual y velocidad
+
+**Al publicar: no hay columnas nuevas.** Si en Google todavía está una versión anterior
+a la 1.5.0, corre `instalar()` una vez (agrega `turnado_usuario`, `fecha_atencion` e
+`informes`; se puede correr las veces que sea).
+
+Cambian: `Servidor.gs`, `Instalacion.gs`, `App.html`, `Estilos.html` (y en la página:
+`herramientas/armar-web.mjs`).
+
+- **Exportación** (tarjeta y pantalla, solo administradores): todas las libretas o una,
+  de una fecha a otra (Este mes, Mes pasado, Este año, Año pasado, Todo o fechas a mano),
+  con vista previa de cuántos registros salen. Cuenta la fecha de recibido; si no hay,
+  la del documento. El Excel trae además «Responsable en el sistema» y «Fecha de atención».
+- **El servidor ya no deja exportar a Captura ni a Consulta** (`exportar` pide rol
+  admin), aunque llamen a la acción directo. Se quitó el botón «Excel» de cada libreta
+  y el «Excel de todas» del portal. El Excel de **Informes** sigue igual: lo tiene quien
+  tenga permiso de Informes.
+- **Paleta exacta del Manual de Identidad CDMX 2024-2030** en tarjetas, pantallas,
+  buscador y gráficas de Informes (café `#ac6d14`, magenta `#d72f89`, rojo `#e5074c`…).
+- **Velocidad** (ver LEEME, «Velocidad»):
+  - `entrar` ya trae el portal (una vuelta menos al entrar).
+  - Después de entrar, en segundo plano: las listas del año de todas las libretas en una
+    sola vuelta (`listarTodo`), Pendientes y, si hay algo turnado, Mis asuntos. Al
+    abrirlas ya se ven; si alguien más capturó algo, aparece un segundo después.
+  - El panel de un oficio abre al instante con lo que ya se ve en la lista; archivos
+    e historial llegan después (Editar, Duplicar e Imprimir se activan al llegar todo).
+  - Guardar, cancelar, subir o quitar archivo regresan el panel completo (`detalle`):
+    ya no se pide otra vez.
+  - En el servidor la hoja se abre **una vez por petición**, y el historial de un oficio
+    busca solo sus renglones en la bitácora (antes la leía completa en cada consulta,
+    y la bitácora crece todos los días). La Bitácora del administrador se lee una vez,
+    no dos.
+  - Lo guardado en memoria es solo de esa pestaña, nunca en disco, y se borra al salir
+    o al cambiar de usuario.
+- La página nueva funciona con un servidor 1.5.0 (sin precarga ni Exportación hasta que
+  se publique el servidor; el administrador ve el aviso de versiones).
+
 ## 1.5.0 · Volante imprimible e Informes
 
 **Al publicar: hay DOS columnas nuevas → corre `instalar()` una vez** (después de pegar o

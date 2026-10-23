@@ -9,6 +9,7 @@ capturas/
 # ── Credenciales y configuración local ────────────────────────────────
 .clasp.json
 .clasprc.json
+.publicar.json
 .env
 .env.*
 .vercel
