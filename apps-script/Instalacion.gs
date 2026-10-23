@@ -175,7 +175,9 @@ var CONFIG_INICIAL = [
   ['plantilla_OFS', 'SAPCI/STPI/{NNN}/{AAAA}', 'Número oficial de los oficios salientes. {NNN} = consecutivo, {AAAA} = año'],
   ['plazo_dias', '', 'Días hábiles por omisión para la fecha límite de un entrante (vacío = sin fecha límite)'],
   ['url_web', '', 'Dirección pública de la app si se publica fuera de Google (Vercel). Vacío = se usa la de Google'],
-  ['esquema', '1', 'Versión del esquema de la base (no la cambies)']
+  ['esquema', '1', 'Versión del esquema de la base (no la cambies)'],
+  ['mantenimiento', 'NO', 'SI = solo los administradores pueden usar el sistema (se cambia en Configuración)'],
+  ['mantenimiento_msg', '', 'Mensaje que ve la gente mientras hay mantenimiento']
 ];
 
 function completarConfig_(log) {

@@ -161,7 +161,7 @@ function crearEntorno({ dueno = "dueno@gmail.com" } = {}) {
   const candado = { tomado: false, veces: 0 };
   const LockService = { getScriptLock: () => ({
     waitLock: () => { if (candado.tomado) throw new Error("Candado ocupado (¿no se liberó?)"); candado.tomado = true; candado.veces++; },
-    tryLock: () => { if (candado.tomado) return false; candado.tomado = true; return true; },
+    tryLock: () => { if (candado.tomado) return false; candado.tomado = true; candado.veces++; return true; },
     releaseLock: () => { candado.tomado = false; },
   }) };
   const props = new Map();

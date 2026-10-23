@@ -60,7 +60,8 @@ function pagina() {
   if (fs.existsSync(FUENTES)) {
     html = html.replace(/<link href="https:\/\/fonts\.googleapis\.com[^>]+>/, '<link rel="stylesheet" href="/__fuentes/fuentes.css">');
   }
-  return html.replace("<head>", "<head>" + SHIM);
+  // Google agrega la etiqueta viewport (addMetaTag en doGet); aquí también, para probar en celular.
+  return html.replace("<head>", '<head><meta name="viewport" content="width=device-width, initial-scale=1">' + SHIM);
 }
 
 http.createServer((req, res) => {

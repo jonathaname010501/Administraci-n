@@ -62,7 +62,7 @@ test("doGet arma la página completa con estilos, Excel y app (aunque Google qui
   assert.match(html, /<style>[\s\S]*--morado: #8f4889[\s\S]*<\/style>\s*<\/head><body>/, "estilos dentro del head");
   assert.match(html, /<div id="app" class="app">/);
   assert.match(html, /<script>[\s\S]*var ExcelCG = [\s\S]*<\/script>/);
-  assert.match(html, /<script>[\s\S]*function llamar\(accion, datos\)[\s\S]*<\/script>\s*<\/body><\/html>$/);
+  assert.match(html, /<script>[\s\S]*function llamar\(accion, datos(, o)?\)[\s\S]*<\/script>\s*<\/body><\/html>$/);
   assert.equal((html.match(/<script>/g) || []).length, 2, "solo los dos bloques de código");
 });
 

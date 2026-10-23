@@ -14,7 +14,7 @@
 
   // Versión de esta página. Debe coincidir con VERSION de Servidor.gs: si la
   // página (Vercel) se actualiza y el servidor (Apps Script) no, se avisa.
-  var VERSION_APP = '1.2.0';
+  var VERSION_APP = '1.5.0';
 
   /* ───────────────────────── Utilidades ───────────────────────── */
   var ICONOS = {
@@ -56,7 +56,16 @@
     turnar: '<path d="M15 14l5-5-5-5"/><path d="M4 20v-7a4 4 0 0 1 4-4h12"/>',
     alarma: '<circle cx="12" cy="13" r="8"/><path d="M12 9v4l2 2M5 3 2 6M22 6l-3-3"/>',
     contactos: '<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20V3H6.5A2.5 2.5 0 0 0 4 5.5z"/><circle cx="12" cy="9" r="2.5"/><path d="M8.5 14a3.5 3.5 0 0 1 7 0"/>',
-    pulso: '<path d="M2.5 13h4l2.3 6 4-14 2.3 8h4.9"/>'
+    pulso: '<path d="M2.5 13h4l2.3 6 4-14 2.3 8h4.9"/>',
+    diana: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.2"/>',
+    persona: '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>',
+    grupo: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><path d="M16 4.6a3.5 3.5 0 0 1 0 6.8M18.5 20a6.5 6.5 0 0 0-3-5.5"/>',
+    duplicar: '<rect x="8" y="8" width="13" height="13" rx="2"/><path d="M4 16V5a2 2 0 0 1 2-2h11"/><path d="M14.5 11.5v6M11.5 14.5h6"/>',
+    camara: '<path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3z"/><circle cx="12" cy="13" r="3.5"/>',
+    herramienta: '<path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.6 2.6-2.4-.6-.6-2.4z"/>',
+    respaldo: '<ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v6c0 1.7 3.6 3 8 3s8-1.3 8-3V5"/><path d="M4 11v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/>',
+    imprimir: '<path d="M6 9V3h12v6"/><rect x="3" y="9" width="18" height="8" rx="2"/><path d="M6 14h12v7H6z"/>',
+    grafica: '<path d="M3 3v18h18"/><path d="M7 16v-4M11 16V8M15 16v-6M19 16V5"/>'
   };
 
   function icono(n) {
@@ -123,6 +132,9 @@
   function etiquetaCampo(t, c, def) { var x = tipoDef(t).campos.filter(function (y) { return y[0] === c; })[0]; return x ? x[1] : def; }
   function puedeCapturar(t) { return E.ini && E.ini.yo.rol !== 'consulta' && (!t || E.ini.orden.indexOf(t) >= 0); }
   function esAdmin() { return E.ini && E.ini.yo.rol === 'admin'; }
+  /** ¿El servidor publicado ya tiene esta acción (y este usuario puede usarla)?
+   *  Con un servidor de versión anterior, lo nuevo simplemente no aparece. */
+  function tiene(accion) { return !!(E.ini && E.ini.acciones && E.ini.acciones.indexOf(accion) >= 0); }
 
   /* ───────────────────────── Servidor ───────────────────────── */
   var enVuelo = 0;
@@ -163,18 +175,25 @@
       });
   }
 
-  function llamar(accion, datos) {
-    progreso(1);
+  function llamar(accion, datos, o) {
+    o = o || {};
+    if (!o.silencioso) progreso(1);
     return transporte(accion, datos).then(function (r) {
-      progreso(-1);
+      if (!o.silencioso) progreso(-1);
       if (r && r.ok) return r.datos;
       var e = new Error(r && r.error ? r.error : 'Respuesta inesperada del servidor.');
       e.codigo = r && r.codigo; e.extra = r && r.extra;
       if (e.codigo === 'SESION') { terminarSesion(e.message); }
       else if (e.codigo === 'CAMBIAR_CLAVE') { pantallaCambiarClave(true); }
+      else if (e.codigo === 'MANTENIMIENTO') {
+        // Modo mantenimiento: quien no es administrador sale con el aviso
+        E.publico = E.publico || {};
+        E.publico.mantenimiento = { activo: true, mensaje: e.message };
+        if (E.token && accion !== 'entrar') terminarSesion();
+      }
       throw e;
     }, function (err) {
-      progreso(-1);
+      if (!o.silencioso) progreso(-1);
       if (err && err.codigo === 'SERVIDOR') throw err;
       var e = new Error(window.CG_API && !(window.google && google.script)
         ? 'No hubo conexión con el servidor de Google. Revisa tu internet; si sigue igual, revisa que la implementación diga «Cualquier usuario» y que CG_API_URL en Vercel sea la URL /exec.'
@@ -183,7 +202,27 @@
       throw e;
     });
   }
-  function fallo(e) { if (e && e.codigo !== 'SESION' && e.codigo !== 'CAMBIAR_CLAVE') aviso(e.message || String(e), 'error'); }
+  function fallo(e) { if (e && e.codigo !== 'SESION' && e.codigo !== 'CAMBIAR_CLAVE' && e.codigo !== 'MANTENIMIENTO') aviso(e.message || String(e), 'error'); }
+
+  /* ─────────── ¿Sigue viva la sesión? ¿Entró el mantenimiento? ───────────
+     Cada 5 min (y al volver a la pestaña) la página pregunta al servidor con
+     «ping». No cuenta como actividad: la sesión se cierra igual a las 3 h sin uso. */
+  var ping = { timer: null, ultimo: 0, apagado: false };
+  function vigilarSesion() {
+    if (ping.timer || ping.apagado || !tiene('ping')) return;
+    ping.timer = setInterval(function () { revisarSesion(false); }, 5 * 60 * 1000);
+  }
+  function revisarSesion(forzar) {
+    if (ping.apagado || !E.token || !E.ini || !tiene('ping') || document.visibilityState === 'hidden') return;
+    if (!forzar && Date.now() - ping.ultimo < 60 * 1000) return;
+    ping.ultimo = Date.now();
+    llamar('ping', null, { silencioso: true }).then(function (r) {
+      var antes = !!(E.ini.mantenimiento && E.ini.mantenimiento.activo);
+      E.ini.mantenimiento = r.mantenimiento;
+      if (E.vista === 'inicio' && antes !== !!(r.mantenimiento && r.mantenimiento.activo)) irA('inicio', null, { sinHistorial: true });
+    }).catch(function (e) { if (e.codigo === 'PETICION') ping.apagado = true; });
+  }
+  document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') revisarSesion(false); });
 
   /* ───────────────────────── Avisos y ventanas ───────────────────────── */
   function aviso(texto, tipo, extra) {
@@ -249,6 +288,7 @@
   function insEstatus(est) {
     return h('span', { class: 'ins ins--' + String(est || 'sin').replace(/\s+/g, '-') }, est || 'Sin estatus');
   }
+  function insMio() { return h('span', { class: 'ins ins--mio', title: 'Te lo turnaron a ti' }, icono('diana'), 'A ti'); }
   function insVence(r) {
     if (!r.fecha_limite || ['Atendido', 'Concluido', 'Cancelado'].indexOf(r.estatus) >= 0) return null;
     var d = diasHasta(r.fecha_limite);
@@ -341,6 +381,18 @@
     window.addEventListener('online', avisoLuz);
     window.addEventListener('offline', avisoLuz);
     var msg = h('div', { role: 'alert' }, mensaje ? h('p', { class: 'login__info' }, mensaje) : null);
+    var cajaMant = h('div', { role: 'status' });
+    function pintarMant() {
+      var mant = E.publico && E.publico.mantenimiento && E.publico.mantenimiento.activo ? E.publico.mantenimiento : null;
+      vaciar(cajaMant);
+      if (mant) cajaMant.appendChild(h('div', { class: 'login__mant' }, icono('herramienta'),
+        h('div', null, h('strong', null, 'Sistema en mantenimiento'), h('p', null, mant.mensaje), h('small', null, 'Por ahora solo pueden entrar los administradores.'))));
+    }
+    pintarMant();
+    // El aviso de mantenimiento se revisa de nuevo al mostrar esta pantalla (pudo cambiar)
+    if (!E.publicoEn || Date.now() - E.publicoEn > 10000) {
+      llamar('estado', null, { silencioso: true }).then(function (p) { E.publico = p; E.publicoEn = Date.now(); pintarMant(); }).catch(function () {});
+    }
     var boton = h('button', { class: 'login__boton', type: 'submit' }, 'Entrar');
     function ocupado(si) {
       boton.disabled = si;
@@ -365,6 +417,7 @@
         else cargarInicio();
       }).catch(function (e) {
         ocupado(false);
+        if (e.codigo === 'MANTENIMIENTO') { pantallaEntrar(); return; }
         vaciar(msg).appendChild(h('p', { class: 'login__error' }, e.message));
         clave.input.value = '';
         clave.input.focus();
@@ -375,7 +428,7 @@
       h('label', { class: 'login__recordar' }, recordar, 'Recordar mi usuario en este equipo'),
       msg, boton);
     lienzoEntrada([].concat(encabezadoTarjeta('Control de Gestión', recordado ? 'Hola de nuevo. Escribe tu contraseña para continuar.' : 'Inicia sesión para continuar.'),
-      [sinRed, form, h('p', { class: 'login__ayuda' }, '¿Olvidaste tu contraseña? Pide a un administrador que te dé una nueva.')]));
+      [cajaMant, sinRed, form, h('p', { class: 'login__ayuda' }, '¿Olvidaste tu contraseña? Pide a un administrador que te dé una nueva.')]));
     // En celular no se abre el teclado de golpe: tapa la pantalla.
     if (!esCelular()) (recordado ? clave.input : usuario).focus();
   }
@@ -431,7 +484,10 @@
   }
 
   function terminarSesion(mensaje) {
-    E.token = null; E.ini = null; guardarLocal('cg_token', null);
+    // Al salir se olvida todo lo de esa persona (importante en computadoras compartidas)
+    E.token = null; E.ini = null; E.busqueda = null; E.inf = null; E.lista = []; cacheTurno = {}; dibujarInformes = null;
+    E.tipo = null; E.anio = null; E.mostrar = 60; E.filtros = { q: '', estatus: '', acuse: '' };
+    guardarLocal('cg_token', null);
     pila.slice().forEach(function (v) { v.cerrar(); });
     cerrarPanel();
     pantallaEntrar(mensaje);
@@ -452,6 +508,8 @@
     VOL: 'Volantes de turno de la Secretaría Particular.'
   };
   var MODULOS = {
+    misAsuntos: { titulo: 'Mis asuntos', icono: 'diana', color: 'verde', ruta: 'mis-asuntos', accion: 'misAsuntos' },
+    informes: { titulo: 'Informes', icono: 'grafica', color: 'cafe', accion: 'informes' },
     pendientes: { titulo: 'Pendientes', icono: 'alarma', color: 'guinda' },
     directorio: { titulo: 'Directorio', icono: 'contactos', color: 'azul' },
     usuarios: { titulo: 'Usuarios', icono: 'usuarios', color: 'guinda' },
@@ -487,6 +545,7 @@
       montar();
       var desde = usaHistorial ? leerRuta() : null;
       irA(desde ? desde.vista : 'inicio', desde ? desde.tipo : null, { reemplazar: true });
+      vigilarSesion();
     }).catch(function (e) { if (e.codigo !== 'SESION' && e.codigo !== 'CAMBIAR_CLAVE') pantallaEntrar(e.message); });
   }
 
@@ -506,12 +565,18 @@
 
   // Rutas legibles en Vercel (#/oficios-salientes) para que sirva el botón Atrás.
   var SLUG = { OFS: 'oficios-salientes', OFE: 'oficios-entrantes', OFC: 'conocimiento', CIR: 'circulares', TAR: 'tarjetas-informativas', VOL: 'volantes' };
-  function rutaDe(v, t) { return '#/' + (v === 'libreta' ? SLUG[t] : v === 'inicio' ? '' : v); }
+  function rutaDe(v, t) { return '#/' + (v === 'libreta' ? SLUG[t] : v === 'inicio' ? '' : (MODULOS[v] && MODULOS[v].ruta) || v); }
   function leerRuta() {
     var r = String(location.hash || '').replace(/^#\/?/, '');
     if (!r) return null;
     for (var t in SLUG) if (SLUG[t] === r && E.ini.orden.indexOf(t) >= 0) return { vista: 'libreta', tipo: t };
-    if (MODULOS[r] && (['usuarios', 'bitacora', 'config'].indexOf(r) < 0 || esAdmin())) return { vista: r };
+    for (var k in MODULOS) {
+      var m = MODULOS[k];
+      if ((m.ruta || k) !== r) continue;
+      if (['usuarios', 'bitacora', 'config'].indexOf(k) >= 0 && !esAdmin()) return null;
+      if (m.accion && !tiene(m.accion)) return null;
+      return { vista: k };
+    }
     return null;
   }
   window.addEventListener('popstate', function () {
@@ -571,10 +636,16 @@
           h('p', { class: 'hero__eyebrow' }, 'Portal institucional' + (fecha ? ' · ' + fecha : '')),
           h('h1', { class: 'hero__t' }, saludo + ',', h('br'), yo.nombre),
           h('p', { class: 'hero__s' }, 'Elige por dónde empezar.')),
+        tiene('buscar') ? buscadorGeneral() : null,
         aviso, bloques),
       h('footer', { class: 'pie' }, (ini.config.encabezados || []).slice(1, 2).join('') || 'Control de Gestión')));
     function pintar(ind) {
       vaciar(aviso);
+      if (esAdmin() && E.ini.mantenimiento && E.ini.mantenimiento.activo) {
+        aviso.appendChild(h('div', { class: 'alerta alerta--mant', style: { marginBottom: '20px' } }, icono('herramienta'),
+          h('div', null, h('strong', null, 'Modo mantenimiento activo. '), 'Solo los administradores pueden usar el sistema. Mensaje: «' + E.ini.mantenimiento.mensaje + '» ',
+            h('button', { class: 'btn btn--chico', onclick: function () { irA('config'); } }, 'Ir a Configuración'))));
+      }
       if (E.ini.version !== VERSION_APP && esAdmin()) {
         aviso.appendChild(h('div', { class: 'alerta alerta--aviso', style: { marginBottom: '20px' } },
           h('strong', null, 'Falta publicar el servidor. '),
@@ -582,8 +653,17 @@
           '. En el editor de Apps Script pega los archivos nuevos y ve a Implementar → Gestionar implementaciones → ✏ → Nueva versión.'));
       }
       ind = ind && ind.porTipo ? ind : { porTipo: {}, global: { porAtender: 0, vencidos: 0, venceHoy: 0, sinAcuse: 0 } };
-      var g = ind.global;
-      if (g.vencidos || g.venceHoy) {
+      var g = ind.global, mios = ind.mios || null;
+      var avisoMio = !!(mios && tiene('misAsuntos') && (mios.vencidos || mios.venceHoy));
+      // Si todo lo vencido es de «Mis asuntos», no se repite el aviso general
+      var avisoGeneral = (g.vencidos || g.venceHoy) && !(avisoMio && g.vencidos === mios.vencidos && g.venceHoy === mios.venceHoy);
+      if (avisoMio) {
+        aviso.appendChild(h('button', { class: 'pav pav--mio', onclick: function () { irA('misAsuntos'); } }, icono('diana'),
+          h('span', { class: 'pav__txt' }, h('strong', null, 'Te turnaron ' + [mios.vencidos ? mios.vencidos + (mios.vencidos === 1 ? ' asunto vencido' : ' asuntos vencidos') : '',
+            mios.venceHoy ? mios.venceHoy + (mios.venceHoy === 1 ? ' que vence hoy' : ' que vencen hoy') : ''].filter(Boolean).join(' y ')),
+            h('small', null, 'Están en «Mis asuntos».')), icono('siguiente')));
+      }
+      if (avisoGeneral) {
         aviso.appendChild(h('button', { class: 'pav', onclick: function () { irA('pendientes'); } }, icono('alarma'),
           h('span', { class: 'pav__txt' }, h('strong', null, (g.vencidos ? g.vencidos + (g.vencidos === 1 ? ' asunto vencido' : ' asuntos vencidos') : '') +
             (g.vencidos && g.venceHoy ? ' y ' : '') + (g.venceHoy ? g.venceHoy + ' vence' + (g.venceHoy === 1 ? '' : 'n') + ' hoy' : '')),
@@ -597,12 +677,16 @@
         if (t === 'OFS' && d.sinAcuse) chips.push(d.sinAcuse + ' sin acuse');
         return { titulo: ini.todosTipos[t].nombre, desc: DESC_TIPO[t], color: COLOR_TIPO[t], icono: ICONO_TIPO[t], chips: chips, ir: function () { irA('libreta', t); } };
       });
-      var seguimiento = [
+      var seguimiento = (tiene('misAsuntos') ? [{ titulo: 'Mis asuntos', desc: 'Lo que te turnaron: lo vencido, lo que vence hoy y lo que sigue.', color: 'verde', icono: 'diana',
+        chips: mios ? [mios.porAtender + ' por atender'].concat(mios.vencidos ? [mios.vencidos + (mios.vencidos === 1 ? ' vencido' : ' vencidos')] : [])
+          .concat(mios.venceHoy ? [mios.venceHoy + ' vence' + (mios.venceHoy === 1 ? '' : 'n') + ' hoy'] : []) : ['Turnados a mí'],
+        ir: function () { irA('misAsuntos'); } }] : []).concat([
         { titulo: 'Pendientes', desc: 'Lo que está por atender, por vencer y los oficios sin acuse.', color: 'guinda', icono: 'alarma',
           chips: (ind.porTipo && Object.keys(ind.porTipo).length ? [g.porAtender + ' por atender'] : ['Por atender']).concat(g.vencidos ? [g.vencidos + ' vencidos'] : []).concat(g.sinAcuse ? [g.sinAcuse + ' oficios sin acuse'] : []), ir: function () { irA('pendientes'); } },
         { titulo: 'Directorio', desc: 'Las personas a quienes se dirige o que firman, escritas siempre igual.', color: 'azul', icono: 'contactos',
           chips: [E.directorio.length + ' personas', 'Buscar'].concat(puedeCapturar() ? ['Agregar'] : []), ir: function () { irA('directorio'); } }
-      ];
+      ]).concat(tiene('informes') ? [{ titulo: 'Informes', desc: 'Registros por mes, remitentes y destinatarios, tiempo de respuesta y atención a tiempo.', color: 'cafe', icono: 'grafica',
+        chips: ['Gráficas', 'Por periodo', 'Excel'], ir: function () { irA('informes'); } }] : []);
       var admin = esAdmin() ? [
         { titulo: 'Usuarios', desc: 'Quién entra, con qué rol y a qué libretas.', color: 'guinda', icono: 'usuarios', chips: ['Dar de alta', 'Roles', 'Contraseñas'], ir: function () { irA('usuarios'); } },
         { titulo: 'Bitácora', desc: 'Quién ha entrado y qué se ha hecho, con el antes y el después.', color: 'azul', icono: 'pulso', chips: ['Accesos', 'Cambios', 'Descargas'], ir: function () { irA('bitacora'); } },
@@ -624,6 +708,74 @@
     llamar('indicadores').then(function (ind) { E.ini.indicadores = ind; if (E.vista === 'inicio') pintar(ind); }).catch(function () {});
   };
 
+  /* ───────────────────────── Buscador general (portal) ───────────────────────── */
+  // Busca en TODAS mis libretas a la vez (el servidor solo revisa las mías).
+  // Sin acentos ni mayúsculas, igual que el buscador de cada libreta.
+  function buscadorGeneral() {
+    var previo = E.busqueda || { q: '', res: null };
+    var input = h('input', { class: 'entrada busq__input', type: 'search', placeholder: 'Buscar en todas mis libretas: número, asunto, persona…',
+      'aria-label': 'Buscar en todas mis libretas', autocomplete: 'off', enterkeyhint: 'search', maxlength: 100, value: previo.q });
+    var res = h('div', { class: 'busq__res', 'aria-live': 'polite' });
+    var espera = null, pedido = 0;
+    function buscar(ahora) {
+      clearTimeout(espera);
+      var q = input.value.trim();
+      if (q.replace(/\s/g, '').length < 2) { E.busqueda = null; vaciar(res); return; }
+      espera = setTimeout(function () {
+        var n = ++pedido;
+        vaciar(res).appendChild(h('div', { class: 'busq__cargando' }, 'Buscando «' + q + '»…'));
+        llamar('buscar', { q: q }).then(function (r) {
+          if (n !== pedido) return;
+          E.busqueda = { q: q, res: r };
+          pintarResultados(q, r);
+        }).catch(function (e) { if (n === pedido) { vaciar(res).appendChild(h('div', { class: 'alerta alerta--error' }, e.message)); } });
+      }, ahora ? 0 : 450);
+    }
+    function pintarResultados(q, r) {
+      vaciar(res);
+      if (!r.total) {
+        res.appendChild(h('div', { class: 'busq__vacio' }, h('strong', null, 'Nada coincide con «' + q + '»'), 'Prueba con menos palabras o con parte del número.'));
+        return;
+      }
+      res.appendChild(h('div', { class: 'busq__cab' },
+        h('p', { class: 'busq__total' }, r.total + (r.total === 1 ? ' resultado' : ' resultados') + ' en ' + r.grupos.length + (r.grupos.length === 1 ? ' libreta' : ' libretas')),
+        r.total > r.mostrados ? h('p', { class: 'busq__nota' }, 'Se muestran los ' + r.mostrados + ' más recientes. Agrega palabras para afinar.') : null,
+        h('button', { type: 'button', class: 'btn btn--chico btn--fantasma', onclick: function () { input.value = ''; buscar(true); input.focus(); } }, icono('cerrar'), 'Limpiar')));
+      r.grupos.forEach(function (g) {
+        var def = E.ini.todosTipos[g.tipo];
+        // Primero 5 por libreta (para no empujar las tarjetas hasta abajo); «Ver más» abre el resto aquí mismo
+        var POR_GRUPO = 5, lista = h('div');
+        g.registros.slice(0, POR_GRUPO).forEach(function (x) { lista.appendChild(itemBusqueda(x)); });
+        var verMas = g.registros.length > POR_GRUPO ? h('button', { type: 'button', class: 'busq__mas busq__mas--aqui', onclick: function () {
+          g.registros.slice(POR_GRUPO).forEach(function (x) { lista.appendChild(itemBusqueda(x)); });
+          verMas.remove();
+        } }, 'Ver ' + (g.registros.length - POR_GRUPO) + ' más aquí') : null;
+        res.appendChild(h('section', { class: 'busq__g busq__g--' + COLOR_TIPO[g.tipo] },
+          h('h3', { class: 'busq__gt' }, h('span', { class: 'busq__ico' }, icono(ICONO_TIPO[g.tipo])), def.nombre, h('span', { class: 'ins' }, g.total)),
+          lista, verMas,
+          g.total > g.registros.length ? h('button', { type: 'button', class: 'busq__mas', onclick: function () {
+            E.tipo = g.tipo; E.filtros = { q: q, estatus: '', acuse: '' }; E.mostrar = 60;
+            irA('libreta', g.tipo);
+          } }, (g.registros.length ? 'Ver los ' + g.total + ' en la libreta' : g.total + ' más en esta libreta: verlos') + ' →') : null));
+      });
+    }
+    function itemBusqueda(x) {
+      var per = lineas(x.tipo === 'OFS' ? x.dirigido_a : x.firma).primera;
+      return h('button', { type: 'button', class: 'busq__i', onclick: function () { abrirDetalle(x.id); } },
+        h('span', { class: 'busq__num' }, h('span', { class: 't-num' }, etiquetaNum(x)), x.numero && x.numero !== etiquetaNum(x) ? h('small', null, x.numero) : null),
+        h('span', { class: 'busq__txt' }, h('span', { class: 'busq__asunto' }, x.asunto || 'Sin asunto'),
+          h('small', null, [per, fechaCorta(x.fecha_recepcion || x.fecha)].filter(Boolean).join(' · '))),
+        h('span', { class: 'busq__est' }, x.estatus ? insEstatus(x.estatus) : null, insVence(x)));
+    }
+    input.addEventListener('input', function () { buscar(false); });
+    input.addEventListener('keydown', function (ev) { if (ev.key === 'Enter') { ev.preventDefault(); buscar(true); } });
+    if (previo.res && previo.q) pintarResultados(previo.q, previo.res);
+    return h('section', { class: 'busq', role: 'search' },
+      h('div', { class: 'busq__caja' }, icono('buscar'), input,
+        h('button', { type: 'button', class: 'btn btn--prim busq__btn', onclick: function () { buscar(true); } }, 'Buscar')),
+      res);
+  }
+
   /* ───────────────────────── Libreta (su propia pantalla) ───────────────────────── */
   var refsReg = {};
   vistas.libreta = function () {
@@ -635,6 +787,7 @@
       ini.anios.map(function (a) { return h('option', { value: a, selected: a === E.anio }, 'Año ' + a); }));
     var est = h('select', { class: 'entrada', 'aria-label': 'Estatus', onchange: function () { E.filtros.estatus = est.value; E.mostrar = 60; pintarLista(); } },
       [['', 'Todos los estatus'], ['(activos)', 'Por atender (pendiente o en trámite)'], ['(vencidos)', 'Vencidos'], ['(mes)', 'De este mes'], ['(sin)', 'Sin estatus']]
+        .concat(tiene('misAsuntos') ? [['(mios)', 'Turnados a mí']] : [])
         .concat(ini.estatus.map(function (s) { return [s, s]; })).map(function (o) {
           return h('option', { value: o[0], selected: o[0] === E.filtros.estatus }, o[1]);
         }));
@@ -658,6 +811,7 @@
   };
 
   function mesActual() { return hoyIso().slice(0, 7); }
+  function esMio(r) { return !!(r.turnado_usuario && E.ini && r.turnado_usuario === E.ini.yo.usuario); }
   function esActivo(r) { return r.estatus === 'Pendiente' || r.estatus === 'En trámite'; }
   function esVencido(r) { return esActivo(r) && r.fecha_limite && r.fecha_limite < hoyIso(); }
   function esDelMes(r) { return String(r.fecha_recepcion || r.fecha || '').slice(0, 7) === mesActual(); }
@@ -677,6 +831,7 @@
       datos.push([E.tipo === 'OFE' ? 'Sin original' : 'Sin acuse', n(function (r) { return r.acuse !== 'SI' && r.estatus !== 'Cancelado'; }), function () { aplicar('', 'NO'); }, E.filtros.acuse === 'NO' && !E.filtros.estatus]);
     }
     datos.push(['De este mes', n(esDelMes), function () { aplicar('(mes)', ''); }, E.filtros.estatus === '(mes)']);
+    if (tiene('misAsuntos')) datos.push(['Turnados a mí', n(esMio), function () { aplicar('(mios)', ''); }, E.filtros.estatus === '(mios)']);
     vaciar(cont);
     datos.forEach(function (d) {
       cont.appendChild(h('button', { class: 'ind' + (d[3] ? ' activo' : ''), onclick: d[2], 'aria-pressed': d[3] ? 'true' : 'false' },
@@ -695,7 +850,7 @@
     return llamar('listar', { tipo: E.tipo, anio: E.anio }).then(function (lista) {
       if (pedido !== E.tipo + E.anio) return;
       lista.forEach(function (r) {
-        r._b = norm([etiquetaNum(r), r.numero, r.asunto, r.dirigido_a, r.firma, r.obs, r.elaboro, r.carpeta, r.turnado_a, r.estatus].join(' '));
+        r._b = norm([etiquetaNum(r), r.numero, r.asunto, r.dirigido_a, r.firma, r.obs, r.elaboro, r.carpeta, r.turnado_a, r.turnado_usuario, r.estatus].join(' '));
       });
       E.lista = lista;
       if (E.anio === E.ini.anioActual) E.ini.conteos[E.tipo] = lista.length;
@@ -713,6 +868,7 @@
       if (f.estatus === '(activos)' && !esActivo(r)) return false;
       if (f.estatus === '(vencidos)' && !esVencido(r)) return false;
       if (f.estatus === '(mes)' && !esDelMes(r)) return false;
+      if (f.estatus === '(mios)' && !esMio(r)) return false;
       if (f.estatus && f.estatus.charAt(0) !== '(' && r.estatus !== f.estatus) return false;
       if (f.acuse && r.acuse !== f.acuse) return false;
       for (var i = 0; i < palabras.length; i++) if (r._b.indexOf(palabras[i]) < 0) return false;
@@ -747,7 +903,7 @@
           h('td', { class: 't-asunto' }, r.asunto || h('em', { style: { color: 'var(--texto-3)' } }, 'Sin asunto'), r.obs ? h('span', { class: 't-asunto__obs' }, r.obs) : null),
           h('td', { class: 't-persona' }, p.primera || '—', p.resto ? h('small', null, p.resto) : null),
           h('td', { class: 't-fecha' }, fechaCorta(r[cf[0]] || r.fecha)),
-          h('td', null, r.estatus ? insEstatus(r.estatus) : null, ' ', insVence(r)),
+          h('td', null, r.estatus ? insEstatus(r.estatus) : null, ' ', insVence(r), esMio(r) ? [' ', insMio()] : null),
           h('td', { class: 't-iconos' },
             h('span', { class: r.acuse === 'SI' ? 'si' : '', title: r.acuse === 'SI' ? 'Con acuse' : 'Sin acuse' }, icono(r.acuse === 'SI' ? 'check' : 'reloj')), ' ',
             r.tiene_archivo || r.tiene_acuse_archivo ? h('span', { title: 'Tiene archivo' }, icono('clip')) : null));
@@ -756,7 +912,7 @@
       var p = lineas(r[cp[0]]);
       return h('div', { class: 'item', onclick: function () { abrirDetalle(r.id); } },
         h('div', { class: 'item__arriba' }, h('span', { class: 't-num' }, etiquetaNum(r)), r.estatus ? insEstatus(r.estatus) : null, insVence(r),
-          r.acuse === 'SI' ? h('span', { class: 'ins ins--Atendido' }, 'Acuse') : null),
+          r.acuse === 'SI' ? h('span', { class: 'ins ins--Atendido' }, 'Acuse') : null, esMio(r) ? insMio() : null),
         h('div', { class: 'item__asunto' }, r.asunto || 'Sin asunto'),
         h('div', { class: 'item__meta' }, [r.numero, p.primera, fechaCorta(r[cf[0]] || r.fecha)].filter(Boolean).join(' · ')));
     }));
@@ -790,6 +946,8 @@
     if (def.recibido && !cancelado && puedeCapturar('OFS')) {
       acciones.push(h('button', { class: 'btn btn--chico', onclick: function () { responder(r); } }, icono('responder'), 'Responder con oficio'));
     }
+    if (puedeCapturar(t)) acciones.push(h('button', { class: 'btn btn--chico', onclick: function () { duplicar(r); } }, icono('duplicar'), 'Duplicar'));
+    if (def.recibido) acciones.push(h('button', { class: 'btn btn--chico', onclick: function () { verVolante(r); } }, icono('imprimir'), 'Imprimir volante'));
     acciones.push(h('button', { class: 'btn btn--chico btn--fantasma', onclick: function () {
       var txt = def.singular + ' ' + etiquetaNum(r) + (r.numero ? ' · ' + r.numero : '');
       (navigator.clipboard ? navigator.clipboard.writeText(txt) : Promise.reject()).then(function () { aviso('Copiado: ' + txt, 'ok'); }, function () { aviso(txt); });
@@ -811,6 +969,10 @@
     function filaSeg(et, valor) { seg.appendChild(h('dt', null, et)); seg.appendChild(h('dd', { class: valor ? '' : 'vacio-dd' }, valor || '—')); }
     seg.appendChild(h('dt', null, 'Estatus')); seg.appendChild(h('dd', null, insEstatus(r.estatus), ' ', insVence(r)));
     filaSeg('Fecha límite', fechaCorta(r.fecha_limite));
+    if (r.turnado_usuario || tiene('misAsuntos')) {
+      seg.appendChild(h('dt', null, 'Responsable en el sistema'));
+      seg.appendChild(h('dd', { class: r.turnado_usuario ? '' : 'vacio-dd' }, r.turnado_usuario ? [r.turnado_nombre || r.turnado_usuario, esMio(r) ? [' ', insMio()] : null] : '—'));
+    }
     filaSeg('Turnado a', r.turnado_a);
 
     var ligados = d.ligados.length ? h('div', { style: { display: 'grid', gap: '6px' } }, d.ligados.map(function (x) {
@@ -853,13 +1015,18 @@
 
   function bloqueArchivo(r, clase, titulo, tiene, nombre) {
     var puede = puedeCapturar(r.tipo) && r.estatus !== 'Cancelado';
+    var listo = function () { abrirDetalle(r.id); cargarListaSiAplica(r.tipo); };
     var input = h('input', { type: 'file', accept: '.pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png', class: 'oculto',
-      onchange: function () { if (input.files[0]) subirArchivo(r, clase, input.files[0]).then(function () { abrirDetalle(r.id); cargarListaSiAplica(r.tipo); }).catch(fallo); } });
+      onchange: function () { var f = input.files[0]; input.value = ''; if (f) subirArchivo(r, clase, f).then(listo).catch(fallo); } });
+    // Cámara del celular: abre la cámara trasera; la foto se comprime antes de subir
+    var camara = inputFoto(function (f) { subirArchivo(r, clase, f, { foto: true }).then(listo).catch(fallo); });
+    var botonFoto = h('button', { class: 'btn btn--chico', onclick: function () { camara.click(); } }, icono('camara'), 'Tomar foto');
     var botones = [];
     if (tiene) {
       botones.push(h('button', { class: 'btn btn--chico', onclick: function () { verArchivo(r, clase); } }, icono('bajar'), 'Abrir'));
       if (puede) {
         botones.push(h('button', { class: 'btn btn--chico btn--fantasma', onclick: function () { input.click(); } }, 'Reemplazar'));
+        botones.push(h('button', { class: 'btn btn--chico btn--fantasma', onclick: function () { camara.click(); } }, icono('camara'), 'Foto'));
         botones.push(h('button', { class: 'icono-btn', title: 'Quitar', 'aria-label': 'Quitar archivo', onclick: function () {
           confirmar('¿Quitar «' + nombre + '» de este registro?\nQueda 30 días en la papelera de Drive del dueño.', { si: 'Quitar', peligro: true }).then(function (s) {
             if (s) llamar('quitarArchivo', { id: r.id, clase: clase }).then(function () { aviso('Archivo quitado.', 'ok'); abrirDetalle(r.id); cargarListaSiAplica(r.tipo); }).catch(fallo);
@@ -868,9 +1035,151 @@
       }
     } else if (puede) {
       botones.push(h('button', { class: 'btn btn--chico', onclick: function () { input.click(); } }, icono('subir'), 'Subir'));
+      botones.push(botonFoto);
     }
     return h('div', { class: 'archivo' + (tiene ? ' tiene' : '') }, h('div', { class: 'archivo__ico' }, icono(tiene ? 'archivo' : 'clip')),
-      h('div', { class: 'archivo__txt' }, h('strong', null, titulo), h('span', null, tiene ? nombre : 'Sin archivo · PDF, JPG o PNG hasta 10 MB')), botones, input);
+      h('div', { class: 'archivo__txt' }, h('strong', null, titulo), h('span', null, tiene ? nombre : 'Sin archivo · PDF, JPG o PNG hasta 10 MB')),
+      h('div', { class: 'archivo__botones' }, botones), input, camara);
+  }
+
+  /* ───────────────────────── Volante de recepción (media carta) ───────────────────────── */
+  // Se arma con h() (texto como texto) y se imprime con window.print(): funciona
+  // dentro de Google (el marco de Apps Script permite «allow-modals») y en Vercel
+  // (sin estilos en línea: el tamaño media carta está en Estilos.html, @page volante).
+  function hojaVolante(r) {
+    var t = r.tipo, def = tipoDef(t), enc = E.ini.config.encabezados || [];
+    var hora = r.origen === 'App' && String(r.creado_en).slice(0, 10) === String(r.fecha_recepcion || '') ? String(r.creado_en).slice(11, 16) : '';
+    var renglon = function (et, valor, o) {
+      o = o || {};
+      return h('div', { class: 'vol__f' + (o.ancho ? ' vol__f--ancho' : '') + (o.alto ? ' vol__f--alto' : '') },
+        h('span', { class: 'vol__et' }, et), h('span', { class: 'vol__v' + (valor ? '' : ' vol__v--vacio') }, valor || ''));
+    };
+    var turnado = [r.turnado_nombre || '', r.turnado_a || ''].filter(Boolean).join(' · ');
+    var ahora = new Date();
+    return h('div', { class: 'vol' },
+      h('header', { class: 'vol__cab' }, h('img', { class: 'vol__logo', src: LOGO, alt: '', width: 56, height: 56 }),
+        h('div', { class: 'vol__inst' }, enc.map(function (x, i) { return h('div', { class: i === 0 ? 'vol__inst1' : '' }, x); }))),
+      h('div', { class: 'vol__titulo' }, h('strong', null, 'Volante de recepción'), h('span', null, def.singular)),
+      h('div', { class: 'vol__nums' },
+        h('div', { class: 'vol__num' }, h('span', { class: 'vol__et' }, 'No. de control'), h('strong', null, t + ' ' + etiquetaNum(r))),
+        h('div', { class: 'vol__num' }, h('span', { class: 'vol__et' }, etiquetaCampo(t, 'numero', 'No. de oficio')), h('strong', null, r.numero || '—'))),
+      h('div', { class: 'vol__datos' },
+        renglon('Fecha de recepción', fechaCorta(r.fecha_recepcion)),
+        renglon('Hora de recepción', hora),
+        renglon(etiquetaCampo(t, 'firma', 'Remitente'), [lineas(r.firma).primera, lineas(r.firma).resto].filter(Boolean).join(' · ') || (r.area || ''), { ancho: true }),
+        renglon('Dirigido a', lineas(r.dirigido_a).primera, { ancho: true }),
+        renglon('Asunto', r.asunto, { ancho: true, alto: true }),
+        renglon('Turnado a', turnado, { ancho: true }),
+        renglon('Fecha límite', fechaCorta(r.fecha_limite)),
+        renglon(etiquetaCampo(t, 'elaboro', 'Recibió'), r.elaboro),
+        renglon('Observaciones', r.observaciones, { ancho: true, alto: true })),
+      h('div', { class: 'vol__firmas' },
+        h('div', { class: 'vol__firma' }, h('div', { class: 'vol__linea' }), h('span', null, 'Recibió · nombre y firma')),
+        h('div', { class: 'vol__firma' }, h('div', { class: 'vol__linea' }), h('span', null, 'Turnado a · nombre, firma y fecha')),
+        h('div', { class: 'vol__sello' }, h('span', null, 'Sello de recibido'))),
+      h('footer', { class: 'vol__pie' }, 'Control de Gestión · impreso el ' + fechaCorta(hoyIso()) + ' ' + ('0' + ahora.getHours()).slice(-2) + ':' + ('0' + ahora.getMinutes()).slice(-2) + ' por ' + E.ini.yo.nombre));
+  }
+
+  function verVolante(r) {
+    var v = ventana({ titulo: 'Volante de recepción · ' + etiquetaNum(r), ancho: 640, sinFoco: true,
+      cuerpo: [h('p', { class: 'campo__ayuda', style: { margin: 0 } }, 'Tamaño media carta (14 × 21.6 cm). Al imprimir, elige la impresora y «Tamaño real» o «100 %».'),
+        h('div', { class: 'vol-previa' }, hojaVolante(r))],
+      pie: [h('button', { class: 'btn', onclick: function () { v.cerrar(); } }, 'Cerrar'),
+        h('button', { class: 'btn btn--prim', onclick: function () { imprimirVolante(r); } }, icono('imprimir'), 'Imprimir')] });
+  }
+
+  function imprimirVolante(r) {
+    var cont = h('div', { class: 'impresion', 'aria-hidden': 'true' }, hojaVolante(r));
+    document.body.appendChild(cont);
+    document.body.classList.add('imprimiendo');
+    var limpio = false;
+    var limpiar = function () {
+      if (limpio) return;
+      limpio = true;
+      cont.remove();
+      document.body.classList.remove('imprimiendo');
+      window.removeEventListener('afterprint', limpiar);
+    };
+    window.addEventListener('afterprint', limpiar);
+    try {
+      window.print();
+    } catch (e) {
+      aviso('El navegador no dejó abrir la impresión. Usa Ctrl+P (o Compartir → Imprimir en el celular).', 'error');
+    }
+    setTimeout(limpiar, 60000);   // por si el navegador no avisa que terminó
+  }
+
+  /* ───────────────────────── Fotos con la cámara ───────────────────────── */
+  // capture="environment" abre la cámara trasera en el celular (en computadora,
+  // el selector de imágenes). No usa getUserMedia: por eso no hace falta
+  // relajar Permissions-Policy (camera=()) ni la CSP de vercel.json.
+  var FOTO_LADO = 2000, FOTO_CALIDAD = 0.8, MAX_BYTES = 10 * 1024 * 1024;
+  function inputFoto(alElegir) {
+    var i = h('input', { type: 'file', accept: 'image/*', capture: 'environment', class: 'oculto', 'aria-hidden': 'true', tabindex: '-1',
+      onchange: function () { var f = i.files[0]; i.value = ''; if (f) alElegir(f); } });
+    return i;
+  }
+  function tamano(b) { return b >= 1048576 ? (b / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(b / 1024)) + ' KB'; }
+  function nombreFoto() {
+    var d = new Date(), z = function (n) { return ('0' + n).slice(-2); };
+    return 'foto-' + hoyIso() + '-' + z(d.getHours()) + z(d.getMinutes()) + z(d.getSeconds()) + '.jpg';
+  }
+  /** Reduce la foto en el navegador: lado mayor de 2000 px y JPEG al 80 % (baja la calidad si aún pesa más de 10 MB). */
+  function comprimirFoto(f) {
+    return new Promise(function (ok, mal) {
+      var url = URL.createObjectURL(f);
+      var img = new Image();
+      img.onload = function () {
+        try {
+          var k = Math.min(1, FOTO_LADO / Math.max(img.naturalWidth, img.naturalHeight));
+          var lienzo = document.createElement('canvas');
+          lienzo.width = Math.max(1, Math.round(img.naturalWidth * k));
+          lienzo.height = Math.max(1, Math.round(img.naturalHeight * k));
+          var g = lienzo.getContext('2d');
+          g.fillStyle = '#fff'; g.fillRect(0, 0, lienzo.width, lienzo.height);   // PNG con transparencia: fondo blanco
+          g.drawImage(img, 0, 0, lienzo.width, lienzo.height);
+          URL.revokeObjectURL(url);
+          var intentar = function (q) {
+            lienzo.toBlob(function (b) {
+              if (!b) return mal(new Error('No se pudo preparar la foto. Intenta de nuevo.'));
+              if (b.size > MAX_BYTES - 64 * 1024 && q > 0.45) return intentar(Math.round((q - 0.15) * 100) / 100);
+              if (b.size > MAX_BYTES) return mal(new Error('La foto sigue pesando más de 10 MB. Tómala con menos resolución.'));
+              var nombre = nombreFoto();
+              var archivo;
+              try { archivo = new File([b], nombre, { type: 'image/jpeg' }); } catch (e) { archivo = b; archivo.name = nombre; }
+              archivo.ancho = lienzo.width; archivo.alto = lienzo.height;
+              ok(archivo);
+            }, 'image/jpeg', q);
+          };
+          intentar(FOTO_CALIDAD);
+        } catch (e) { mal(new Error('No se pudo preparar la foto: ' + e.message)); }
+      };
+      img.onerror = function () { URL.revokeObjectURL(url); mal(new Error('No se pudo leer la imagen. Si es una foto HEIC, cámbiala a JPG o súbela como archivo.')); };
+      img.src = url;
+    });
+  }
+  /** Elegir un archivo o tomar una foto (en el formulario de alta). */
+  function selectorArchivo(etiqueta) {
+    var elegido = null;
+    var info = h('span', { class: 'selarch__nombre' }, 'Ningún archivo');
+    var quitar = h('button', { type: 'button', class: 'icono-btn oculto', 'aria-label': 'Quitar archivo', title: 'Quitar', onclick: function () { poner(null); } }, icono('cerrar'));
+    var normal = h('input', { type: 'file', class: 'oculto', accept: '.pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png',
+      onchange: function () { var f = normal.files[0]; normal.value = ''; if (f) poner(f); } });
+    var foto = inputFoto(function (f) {
+      info.textContent = 'Preparando la foto…';
+      comprimirFoto(f).then(poner).catch(function (e) { poner(elegido); fallo(e); });
+    });
+    function poner(f) {
+      elegido = f || null;
+      info.textContent = f ? (f.name || 'archivo') + ' · ' + tamano(f.size) : 'Ningún archivo';
+      quitar.classList.toggle('oculto', !f);
+    }
+    var el = h('div', { class: 'campo' }, h('span', { class: 'campo__et' }, etiqueta),
+      h('div', { class: 'selarch' },
+        h('button', { type: 'button', class: 'btn btn--chico', onclick: function () { normal.click(); } }, icono('subir'), 'Elegir archivo'),
+        h('button', { type: 'button', class: 'btn btn--chico', onclick: function () { foto.click(); } }, icono('camara'), 'Tomar foto')),
+      h('div', { class: 'selarch__fila' }, info, quitar), normal, foto);
+    return { el: el, archivo: function () { return elegido; } };
   }
 
   function leerArchivo(f) {
@@ -886,8 +1195,15 @@
     });
   }
 
-  function subirArchivo(r, clase, f) {
-    return leerArchivo(f).then(function (a) {
+  function subirArchivo(r, clase, f, o) {
+    o = o || {};
+    var esImagen = /^image\//.test(f.type || '') && f.type !== 'image/svg+xml';
+    var preparar = Promise.resolve(f);
+    if (o.foto || (esImagen && f.size > MAX_BYTES)) {
+      aviso('Preparando la foto…');
+      preparar = comprimirFoto(f);
+    }
+    return preparar.then(leerArchivo).then(function (a) {
       aviso('Subiendo ' + a.nombre + '…');
       return llamar('subirArchivo', { id: r.id, clase: clase, nombre: a.nombre, mime: a.mime, base64: a.base64 });
     }).then(function (res) { aviso('Archivo guardado.', 'ok'); return res; });
@@ -913,6 +1229,19 @@
         } }, 'Cancelar registro')] });
   }
 
+  /**
+   * «Duplicar»: abre el formulario de alta con los datos de este registro.
+   * NO se copian: número, archivos, estatus, cancelación, historial, acuse,
+   * relación ni fechas (el registro nuevo es otro documento: lleva fechas propias).
+   */
+  var CAMPOS_COPIA = ['asunto', 'dirigido_id', 'dirigido_a', 'firma_id', 'firma', 'area', 'elaboro', 'carpeta', 'observaciones', 'turnado_a', 'turnado_usuario'];
+  function duplicar(r) {
+    cerrarPanel();
+    var pre = {};
+    CAMPOS_COPIA.forEach(function (k) { if (r[k] !== undefined && r[k] !== null && r[k] !== '') pre[k] = r[k]; });
+    formulario(r.tipo, null, { prefill: pre, copia: r });
+  }
+
   function responder(orig) {
     cerrarPanel();
     formulario('OFS', null, { prefill: {
@@ -923,6 +1252,95 @@
   }
 
   /* ───────────────────────── Buscador de personas ───────────────────────── */
+  /** Personas del directorio que coinciden con el texto: primero por NOMBRE, después por cargo o dependencia. */
+  function buscarEnDirectorio(texto, excluir) {
+    var palabras = norm(texto).split(' ').filter(Boolean);
+    return E.directorio.map(function (p) {
+      if (excluir && excluir[p.id]) return null;
+      var n = p._n || (p._n = norm(p.nombre));
+      var b = p._b || (p._b = norm(p.nombre + ' ' + p.cargo + ' ' + (p.dependencia || '')));
+      if (!palabras.every(function (w) { return b.indexOf(w) >= 0; })) return null;
+      return { p: p, peso: palabras.every(function (w) { return n.indexOf(w) >= 0; }) ? 0 : 1 };
+    }).filter(Boolean).sort(function (a, b) { return a.peso - b.peso; }).slice(0, 30).map(function (x) { return x.p; });
+  }
+
+  /**
+   * «Varios destinatarios»: se eligen personas del directorio y quedan como
+   * fichas (chips). Cada ficha tiene su ✕ para quitarla.
+   */
+  function comboVarios(maximo, alCambiar) {
+    var elegidos = [];
+    var input = h('input', { class: 'entrada', autocomplete: 'off', role: 'combobox', 'aria-expanded': 'false', 'aria-label': 'Agregar destinatario',
+      placeholder: 'Escribe un nombre y elígelo de la lista…', enterkeyhint: 'search' });
+    var lista = h('div', { class: 'combo__lista oculto', role: 'listbox' });
+    var fichas = h('div', { class: 'fichas', 'aria-live': 'polite' });
+    var cuenta = h('span', { class: 'fichas__cuenta' });
+    var opciones = [], activa = -1;
+    function pintar() {
+      vaciar(fichas);
+      elegidos.forEach(function (p, i) {
+        fichas.appendChild(h('span', { class: 'ficha', title: p.cargo || '' }, h('span', { class: 'ficha__n' }, i + 1), h('span', { class: 'ficha__t' }, p.nombre),
+          h('button', { type: 'button', class: 'ficha__x', 'aria-label': 'Quitar a ' + p.nombre, onclick: function () {
+            elegidos = elegidos.filter(function (x) { return x.id !== p.id; }); pintar(); if (!esCelular()) input.focus();
+          } }, '✕')));
+      });
+      if (!elegidos.length) fichas.appendChild(h('span', { class: 'fichas__vacio' }, 'Todavía no hay destinatarios.'));
+      cuenta.textContent = elegidos.length + ' de ' + maximo + ' como máximo';
+      cuenta.classList.toggle('fichas__cuenta--tope', elegidos.length >= maximo);
+      if (alCambiar) alCambiar(elegidos);
+    }
+    function agregar(p) {
+      if (elegidos.length >= maximo) { aviso('El máximo por vez es ' + maximo + ' destinatarios.', 'error'); return; }
+      if (!elegidos.some(function (x) { return x.id === p.id; })) elegidos.push(p);
+      input.value = ''; cerrarLista(); pintar(); input.focus();
+    }
+    function cerrarLista() { lista.classList.add('oculto'); input.setAttribute('aria-expanded', 'false'); activa = -1; }
+    function abrir() {
+      var ya = {};
+      elegidos.forEach(function (x) { ya[x.id] = true; });
+      var res = input.value.trim() ? buscarEnDirectorio(input.value, ya) : [];
+      vaciar(lista); opciones = [];
+      res.forEach(function (p) {
+        var b = h('button', { type: 'button', class: 'combo__op', role: 'option', onmousedown: function (ev) { ev.preventDefault(); agregar(p); } }, p.nombre, p.cargo ? h('small', null, p.cargo) : null);
+        opciones.push({ el: b, p: p }); lista.appendChild(b);
+      });
+      if (input.value.trim().length >= 3 && puedeCapturar()) {
+        var texto = input.value.trim();
+        var nueva = h('button', { type: 'button', class: 'combo__op combo__op--nueva', onmousedown: function (ev) {
+          ev.preventDefault(); cerrarLista();
+          modalPersona({ nombre: texto }).then(function (p) { if (p) agregar(p); });
+        } }, '+ Agregar «' + texto + '» al directorio');
+        opciones.push({ el: nueva, nueva: true }); lista.appendChild(nueva);
+      }
+      if (!input.value.trim()) { cerrarLista(); return; }
+      if (!opciones.length) lista.appendChild(h('div', { class: 'combo__op', style: { color: 'var(--texto-3)' } }, 'Sin coincidencias'));
+      lista.classList.remove('oculto'); input.setAttribute('aria-expanded', 'true');
+    }
+    input.addEventListener('input', abrir);
+    input.addEventListener('focus', function () { if (input.value) abrir(); });
+    input.addEventListener('blur', function () { setTimeout(cerrarLista, 120); });
+    input.addEventListener('keydown', function (ev) {
+      if (lista.classList.contains('oculto')) { if (ev.key === 'ArrowDown') abrir(); return; }
+      if (ev.key === 'ArrowDown' || ev.key === 'ArrowUp') {
+        ev.preventDefault();
+        activa = Math.max(0, Math.min(opciones.length - 1, activa + (ev.key === 'ArrowDown' ? 1 : -1)));
+        opciones.forEach(function (x, i) { x.el.classList.toggle('activa', i === activa); });
+        if (opciones[activa]) opciones[activa].el.scrollIntoView({ block: 'nearest' });
+      } else if (ev.key === 'Enter') {
+        ev.preventDefault();
+        var op = opciones[activa >= 0 ? activa : 0];
+        if (!op) return;
+        if (op.nueva) op.el.dispatchEvent(new MouseEvent('mousedown')); else agregar(op.p);
+      } else if (ev.key === 'Escape') { ev.stopPropagation(); cerrarLista(); }
+    });
+    pintar();
+    var el = h('div', { class: 'campo ancho varios' },
+      h('div', { class: 'varios__cab' }, h('label', { for: (input.id = 'c' + Math.random().toString(36).slice(2, 9)) }, 'Destinatarios', h('span', { style: { color: 'var(--guinda)' } }, ' *')), cuenta),
+      fichas, h('div', { class: 'combo' }, input, lista),
+      h('div', { class: 'campo__ayuda' }, 'Se crea un oficio para cada persona, con número propio y seguido, y el mismo asunto, firma, fecha y elaboró.'));
+    return { el: el, input: input, elegidos: function () { return elegidos.slice(); } };
+  }
+
   function comboPersona(etiqueta, inicial, o) {
     o = o || {};
     var sel = { id: inicial.id || '', texto: inicial.texto || '' };
@@ -948,14 +1366,7 @@
     }
     function cerrarLista() { lista.classList.add('oculto'); input.setAttribute('aria-expanded', 'false'); activa = -1; }
     function abrir() {
-      var palabras = norm(input.value).split(' ').filter(Boolean);
-      // Primero quienes coinciden por NOMBRE; después por cargo o dependencia
-      var res = E.directorio.map(function (p) {
-        var n = p._n || (p._n = norm(p.nombre));
-        var b = p._b || (p._b = norm(p.nombre + ' ' + p.cargo + ' ' + (p.dependencia || '')));
-        if (!palabras.every(function (w) { return b.indexOf(w) >= 0; })) return null;
-        return { p: p, peso: palabras.every(function (w) { return n.indexOf(w) >= 0; }) ? 0 : 1 };
-      }).filter(Boolean).sort(function (a, b) { return a.peso - b.peso; }).slice(0, 30).map(function (x) { return x.p; });
+      var res = buscarEnDirectorio(input.value);
       vaciar(lista); opciones = [];
       res.forEach(function (p) {
         var b = h('button', { type: 'button', class: 'combo__op', role: 'option', onmousedown: function (ev) { ev.preventDefault(); elegir(p); } }, p.nombre, p.cargo ? h('small', null, p.cargo) : null);
@@ -1046,7 +1457,7 @@
     var ctrl = {}, limiteTocado = !!base.fecha_limite;
     // Al capturar, propone a quien más se repite en esta libreta (casi siempre
     // firma el mismo titular y los entrantes van dirigidos a la misma persona).
-    if (nuevo && E.tipo === t && E.lista.length) {
+    if (nuevo && !opciones.copia && E.tipo === t && E.lista.length) {
       [['dirigido_id', 'dirigido_a'], ['firma_id', 'firma']].forEach(function (par) {
         if (pre[par[0]] || (par[0] === 'firma_id' && def.recibido) || (par[0] === 'dirigido_id' && !def.recibido)) return;
         var cuenta = {}, mejor = null;
@@ -1087,6 +1498,28 @@
       }
     });
 
+    // «Varios destinatarios»: el mismo oficio para varias personas (solo al dar de alta un oficio saliente)
+    var modoVarios = false, varios = null, interruptorVarios = null;
+    if (nuevo && def.numeroAuto && combos.dirigido && !opciones.original && !opciones.copia && tiene('guardarVarios')) {
+      varios = comboVarios(E.ini.maxVarios || 100, function () { if (modoVarios) textoBoton(); });
+      varios.el.classList.add('oculto');
+      combos.dirigido.el.parentNode.insertBefore(varios.el, combos.dirigido.el.nextSibling);
+      var chk = h('input', { type: 'checkbox', onchange: function () { cambiarModo(chk.checked); } });
+      interruptorVarios = h('label', { class: 'interruptor' }, chk, h('span', { class: 'interruptor__t' }, icono('grupo'),
+        h('span', null, h('strong', null, 'Varios destinatarios'), h('small', null, 'El mismo oficio para varias personas, cada una con su número.'))));
+    }
+    function cambiarModo(si) {
+      modoVarios = si;
+      combos.dirigido.el.classList.toggle('oculto', si);
+      varios.el.classList.toggle('oculto', !si);
+      if (archivos) archivos.classList.toggle('oculto', si);
+      if (notaArchivos) notaArchivos.classList.toggle('oculto', !si);
+      if (previo) previo.classList.toggle('oculto', si);
+      textoBoton();
+      vaciar(msg);
+      if (si) varios.input.focus();
+    }
+
     // Seguimiento
     var estOps = [['', 'Sin estatus']].concat(E.ini.estatus.filter(function (s) { return s !== 'Cancelado' || esAdmin() || base.estatus === 'Cancelado'; }).map(function (s) { return [s, s]; }));
     var estDef = nuevo ? (def.recibido ? 'Pendiente' : '') : '';
@@ -1094,6 +1527,32 @@
     ctrl.fecha_limite = h('input', { class: 'entrada', type: 'date', value: ini('fecha_limite', ''), min: '2000-01-01', max: '2100-12-31', oninput: function () { limiteTocado = true; } });
     var dlTurno = h('datalist', { id: 'dl-turno' }, E.directorio.map(function (p) { return h('option', { value: p.nombre }); }));
     ctrl.turnado_a = h('input', { class: 'entrada', list: 'dl-turno', maxlength: 300, value: ini('turnado_a', '') });
+    // Turnar a una persona del sistema: le aparece en «Mis asuntos»
+    var campoTurno = null, notaTurno = h('div', { class: 'campo__ayuda' }, 'Le aparece en «Mis asuntos». Solo se muestran usuarios activos con acceso a esta libreta.');
+    if (tiene('usuariosTurno')) {
+      var turnoActual = ini('turnado_usuario', '');
+      ctrl.turnado_usuario = h('select', { class: 'entrada', 'aria-label': 'Turnar a una persona del sistema' },
+        h('option', { value: '' }, '— Nadie —'),
+        turnoActual ? h('option', { value: turnoActual, selected: true }, base.turnado_nombre || (opciones.copia && opciones.copia.turnado_nombre) || turnoActual) : null);
+      ctrl.turnado_usuario.addEventListener('change', function () {
+        if (ctrl.turnado_usuario.value && !ctrl.estatus.value) {
+          ctrl.estatus.value = 'Pendiente';
+          notaTurno.textContent = 'Se cambió el estatus a «Pendiente» para que le aparezca como asunto por atender.';
+        }
+      });
+      usuariosParaTurnar(t).then(function (us) {
+        var sel = ctrl.turnado_usuario.value;
+        vaciar(ctrl.turnado_usuario).appendChild(h('option', { value: '' }, '— Nadie —'));
+        var esta = false;
+        us.forEach(function (u) {
+          if (u.usuario === sel) esta = true;
+          ctrl.turnado_usuario.appendChild(h('option', { value: u.usuario, selected: u.usuario === sel }, u.nombre + (u.usuario === E.ini.yo.usuario ? ' (yo)' : '')));
+        });
+        if (sel && !esta) ctrl.turnado_usuario.appendChild(h('option', { value: sel, selected: true }, (base.turnado_nombre || sel) + ' (ya no tiene acceso)'));
+        ctrl.turnado_usuario.value = sel;
+      }).catch(function () { /* se queda con lo que ya tenía */ });
+      campoTurno = h('div', { class: 'campo ancho' }, campo('Turnar a una persona del sistema', ctrl.turnado_usuario), notaTurno);
+    }
     var relacionado = ini('relacionado_id', '');
     var cajaRel = h('div');
     function pintarRel() {
@@ -1113,15 +1572,17 @@
     }
     var segui = h('fieldset', { class: 'grupo' }, h('legend', null, 'Seguimiento'),
       h('div', { class: 'rejilla' }, campo('Estatus', ctrl.estatus), campo('Fecha límite de respuesta', ctrl.fecha_limite, { ayuda: plazo && def.recibido ? 'Se calcula con ' + plazo + ' días hábiles; puedes cambiarla.' : null }),
-        h('div', { class: 'campo ancho' }, campo('Turnado a', ctrl.turnado_a, { ayuda: 'Área o persona que lo atiende.' }), dlTurno),
+        campoTurno,
+        h('div', { class: 'campo ancho' }, campo('Turnado a', ctrl.turnado_a, { ayuda: campoTurno ? 'Área o persona externa que lo atiende (texto libre).' : 'Área o persona que lo atiende.' }), dlTurno),
         h('div', { class: 'ancho' }, cajaRel),
         marcarAtendido ? h('label', { class: 'casilla ancho' }, marcarAtendido, 'Al guardar, marcar el original como «Atendido»') : null));
 
     // Archivos (solo al dar de alta; después se manejan desde el detalle)
-    var fDoc = h('input', { type: 'file', class: 'entrada', accept: '.pdf,.jpg,.jpeg,.png' });
-    var fAcu = h('input', { type: 'file', class: 'entrada', accept: '.pdf,.jpg,.jpeg,.png' });
+    var fDoc = selectorArchivo('Documento escaneado');
+    var fAcu = selectorArchivo(t === 'OFE' ? 'Oficio original / acuse' : 'Acuse');
     var archivos = nuevo ? h('fieldset', { class: 'grupo' }, h('legend', null, 'Archivos (opcional)'),
-      h('div', { class: 'rejilla' }, campo('Documento escaneado', fDoc), campo(t === 'OFE' ? 'Oficio original / acuse' : 'Acuse', fAcu))) : null;
+      h('div', { class: 'rejilla' }, fDoc.el, fAcu.el)) : null;
+    var notaArchivos = varios ? h('div', { class: 'alerta alerta--info oculto' }, 'Con varios destinatarios, los escaneos y acuses se suben después en cada oficio (desde su detalle).') : null;
 
     var previo = null;
     if (def.numeroAuto && nuevo) {
@@ -1133,8 +1594,14 @@
         ejemplo ? h('strong', null, ejemplo) : null, ejemplo ? ').' : null);
     }
     var msg = h('div');
-    var boton = h('button', { class: 'btn btn--prim', type: 'button', onclick: function () { enviar(false); } }, nuevo ? 'Guardar y asignar número' : 'Guardar cambios');
-    if (!def.numeroAuto && nuevo) boton.textContent = 'Guardar';
+    var boton = h('button', { class: 'btn btn--prim', type: 'button', onclick: function () { if (modoVarios) enviarVarios(); else enviar(false); } });
+    function textoBoton() {
+      if (modoVarios) {
+        var n = varios.elegidos().length;
+        boton.textContent = n ? 'Revisar y crear ' + n + (n === 1 ? ' oficio' : ' oficios') : 'Elige los destinatarios';
+      } else boton.textContent = nuevo ? (def.numeroAuto ? 'Guardar y asignar número' : 'Guardar') : 'Guardar cambios';
+    }
+    textoBoton();
 
     function datos() {
       var d = { tipo: t };
@@ -1144,6 +1611,7 @@
       if (combos.firma) { d.firma_id = combos.firma.valor().id; d.firma = combos.firma.valor().texto; }
       d.relacionado_id = relacionado;
       if (marcarAtendido && marcarAtendido.checked) d.marcarAtendido = true;
+      if (opciones.copia) d.copia_de = opciones.copia.id;
       return d;
     }
     var original = JSON.stringify(datos());
@@ -1157,19 +1625,19 @@
       llamar('guardar', d).then(function (res) {
         var r = res.registro;
         var subidas = Promise.resolve();
-        if (nuevo && fDoc.files[0]) subidas = subidas.then(function () { return subirArchivo(r, 'oficio', fDoc.files[0]); });
-        if (nuevo && fAcu.files[0]) subidas = subidas.then(function () { return subirArchivo(r, 'acuse', fAcu.files[0]); });
+        if (nuevo && fDoc.archivo()) subidas = subidas.then(function () { return subirArchivo(r, 'oficio', fDoc.archivo()); });
+        if (nuevo && fAcu.archivo()) subidas = subidas.then(function () { return subirArchivo(r, 'acuse', fAcu.archivo()); });
         return subidas.catch(function (e) { aviso('El registro se guardó, pero el archivo no: ' + e.message, 'error'); }).then(function () {
           v.antesDeCerrar = null; v.cerrar();
           if (res.sinCambios) aviso('No había cambios que guardar.');
           else aviso((nuevo ? 'Registrado: ' : 'Guardado: ') + def.singular + ' ' + etiquetaNum(r) + (r.numero && def.numeroAuto ? ' · ' + r.numero : ''), 'ok');
           if (nuevo && E.anio === E.ini.anioActual) E.ini.conteos[t] = (E.ini.conteos[t] || 0) + 1;
           if (E.vista === 'libreta') cargarLista();
-          else if (E.vista === 'pendientes') irA('pendientes', null, { sinHistorial: true });
+          else if (E.vista === 'pendientes' || E.vista === 'misAsuntos') irA(E.vista, null, { sinHistorial: true });
           abrirDetalle(r.id);
         });
       }).catch(function (e) {
-        boton.disabled = false; boton.textContent = nuevo ? (def.numeroAuto ? 'Guardar y asignar número' : 'Guardar') : 'Guardar cambios';
+        boton.disabled = false; textoBoton();
         if (e.codigo === 'DUPLICADO') {
           confirmar(e.message, { titulo: 'Número repetido', si: 'Sí, es otro documento: guardar', no: 'Revisar' }).then(function (s) { if (s) enviar(true); });
         } else {
@@ -1179,17 +1647,94 @@
       });
     }
 
+    function error(texto, foco) {
+      vaciar(msg).appendChild(h('div', { class: 'alerta alerta--error' }, texto));
+      msg.scrollIntoView({ block: 'nearest' });
+      if (foco) foco.focus();
+    }
+
+    /** Varios destinatarios: 1) vista previa de los números, 2) confirmar, 3) guardar todos juntos. */
+    function enviarVarios() {
+      var elegidos = varios.elegidos();
+      var d = datos();
+      if (!elegidos.length) return error('Elige al menos un destinatario.', varios.input);
+      if (!String(d.asunto || '').trim()) return error('Falta el asunto.', ctrl.asunto);
+      if (!d.fecha) return error('Falta la fecha.', ctrl.fecha);
+      delete d.dirigido_id; delete d.dirigido_a; delete d.relacionado_id; delete d.marcarAtendido;
+      d.destinatarios = elegidos.map(function (p) { return { dirigido_id: p.id, dirigido_a: p.nombre + (p.cargo ? '\n' + p.cargo : '') }; });
+      vaciar(msg);
+      boton.disabled = true; boton.textContent = 'Revisando…';
+      var listo = function () { boton.disabled = false; textoBoton(); };
+      var previa = Object.assign({}, d, { previa: true });
+      llamar('guardarVarios', previa).then(function (p) { listo(); confirmarVarios(d, p, ''); })
+        .catch(function (e) { listo(); error(e.message); });
+    }
+
+    function confirmarVarios(d, p, aviso1) {
+      var tabla = h('div', { class: 'previa-varios' }, p.numeros.map(function (x) {
+        return h('div', { class: 'previa-varios__f' }, h('strong', { class: 't-num' }, x.numero), h('span', null, lineas(x.dirigido_a).primera));
+      }));
+      var cuerpo = [
+        aviso1 ? h('div', { class: 'alerta alerta--aviso' }, aviso1) : null,
+        h('p', { class: 'previa-varios__t' }, 'Se crearán ', h('strong', null, p.cuantos + (p.cuantos === 1 ? ' oficio' : ' oficios')), ': del ', h('strong', null, p.desde), ' al ', h('strong', null, p.hasta), '.'),
+        h('p', { class: 'campo__ayuda', style: { margin: 0 } }, 'Mismo asunto, firma, fecha y elaboró. Cada oficio queda con su número, en este orden:'),
+        tabla
+      ];
+      var hecho = false;
+      var cv = ventana({ titulo: 'Confirmar ' + p.cuantos + (p.cuantos === 1 ? ' oficio' : ' oficios'), ancho: 560, sinFoco: true, cuerpo: cuerpo,
+        pie: [h('button', { class: 'btn', onclick: function () { cv.cerrar(); } }, 'Revisar'),
+          h('button', { class: 'btn btn--prim', onclick: function () {
+            if (hecho) return;
+            hecho = true;
+            this.disabled = true; this.textContent = 'Guardando…';
+            llamar('guardarVarios', Object.assign({}, d, { desde: p.consecutivoDesde })).then(function (res) {
+              cv.cerrar();
+              v.antesDeCerrar = null; v.cerrar();
+              aviso('Registrados ' + res.cuantos + ' oficios: del ' + res.desde + ' al ' + res.hasta + '.', 'ok');
+              if (E.anio === E.ini.anioActual) E.ini.conteos[t] = (E.ini.conteos[t] || 0) + res.cuantos;
+              if (E.vista === 'libreta') cargarLista();
+              resultadoVarios(res);
+            }).catch(function (e) {
+              cv.cerrar();
+              if (e.codigo === 'CAMBIO_NUMERO' && e.extra) confirmarVarios(d, e.extra, e.message);
+              else error(e.message);
+            });
+          } }, 'Sí, crear ' + p.cuantos + (p.cuantos === 1 ? ' oficio' : ' oficios'))] });
+    }
+
     var v = ventana({
-      titulo: nuevo ? 'Nuevo ' + def.singular.toLowerCase() : 'Editar ' + def.singular.toLowerCase() + ' ' + etiquetaNum(base),
+      titulo: nuevo ? (opciones.copia ? 'Nuevo ' + def.singular.toLowerCase() + ' (copia de ' + etiquetaNum(opciones.copia) + ')' : 'Nuevo ' + def.singular.toLowerCase()) : 'Editar ' + def.singular.toLowerCase() + ' ' + etiquetaNum(base),
       ancho: 820,
-      cuerpo: [msg, previo, rejilla, segui, archivos],
+      cuerpo: [msg, interruptorVarios, previo, rejilla, segui, archivos, notaArchivos],
       pie: [h('button', { class: 'btn', onclick: function () { v.intentarCerrar(); } }, 'Cancelar'), boton],
       antesDeCerrar: function () {
-        if (JSON.stringify(datos()) === original && !(fDoc.files && fDoc.files[0]) && !(fAcu.files && fAcu.files[0])) return true;
+        if (JSON.stringify(datos()) === original && !fDoc.archivo() && !fAcu.archivo() && !(varios && varios.elegidos().length)) return true;
         return confirmar('Hay cambios sin guardar. ¿Salir sin guardar?', { si: 'Salir sin guardar', no: 'Seguir editando', peligro: true });
       }
     });
     if (panelActual && !nuevo) cerrarPanel();
+  }
+
+  /** Lo que se creó con «Varios destinatarios», para copiarlo o revisarlo. */
+  function resultadoVarios(res) {
+    var texto = res.registros.map(function (r) { return r.numero + '\t' + lineas(r.dirigido_a).primera; }).join('\n');
+    var rv = ventana({ titulo: res.cuantos + ' oficios registrados', ancho: 560, sinFoco: true,
+      cuerpo: [h('div', { class: 'alerta alerta--ok' }, 'Del ', h('strong', null, res.desde), ' al ', h('strong', null, res.hasta), '. Los escaneos y acuses se suben en cada oficio.'),
+        h('div', { class: 'previa-varios' }, res.registros.map(function (r) {
+          return h('button', { type: 'button', class: 'previa-varios__f previa-varios__f--btn', onclick: function () { rv.cerrar(); abrirDetalle(r.id); } },
+            h('strong', { class: 't-num' }, r.numero), h('span', null, lineas(r.dirigido_a).primera));
+        }))],
+      pie: [h('button', { class: 'btn', onclick: function () {
+        (navigator.clipboard ? navigator.clipboard.writeText(texto) : Promise.reject()).then(function () { aviso('Lista copiada.', 'ok'); }, function () { aviso('No se pudo copiar; selecciónala a mano.'); });
+      } }, icono('copiar'), 'Copiar lista'), h('button', { class: 'btn btn--prim', onclick: function () { rv.cerrar(); } }, 'Listo')] });
+  }
+
+  /** Usuarios a quienes se puede turnar en una libreta (se guardan 5 min en la página). */
+  var cacheTurno = {};
+  function usuariosParaTurnar(t) {
+    var c = cacheTurno[t];
+    if (c && Date.now() - c.cuando < 5 * 60 * 1000) return Promise.resolve(c.lista);
+    return llamar('usuariosTurno', { tipo: t }).then(function (lista) { cacheTurno[t] = { cuando: Date.now(), lista: lista }; return lista; });
   }
 
   /* ───────────────────────── Excel ───────────────────────── */
@@ -1255,6 +1800,383 @@
         p.sinAcuse.length > limite ? h('div', { class: 'vacio' }, 'Y ' + (p.sinAcuse.length - limite) + ' más. En Registros filtra «Sin acuse».') : null));
     }).catch(function (e) { fallo(e); vaciar(cont).appendChild(h('div', { class: 'tarjeta vacio' }, e.message)); });
   };
+
+  /* ───────────────────────── Mis asuntos ───────────────────────── */
+  vistas.misAsuntos = function () {
+    var cont = h('div', { class: 'mis' }, h('div', { class: 'tarjeta vacio' }, 'Cargando…'));
+    marco('misAsuntos').appendChild(h('div', null, h('div', { class: 'titulo-vista' }, h('h1', null, 'Mis asuntos'),
+      h('span', { class: 'sub' }, 'Lo que te turnaron, de tus libretas')), cont));
+    if (!tiene('misAsuntos')) {
+      vaciar(cont).appendChild(h('div', { class: 'tarjeta vacio' }, h('strong', null, 'Falta publicar el servidor'), 'Esta pantalla necesita la versión ' + VERSION_APP + ' del servidor de Apps Script.'));
+      return;
+    }
+    llamar('misAsuntos').then(function (m) {
+      vaciar(cont);
+      var hoy = m.hoy || hoyIso();
+      var grupos = [
+        { clave: 'vencidos', titulo: 'Vencidos', icono: 'alerta', clase: 'mis__g--vencido', vacio: 'Nada vencido.', filtro: function (r) { return esActivo(r) && r.fecha_limite && r.fecha_limite < hoy; } },
+        { clave: 'hoy', titulo: 'Vencen hoy', icono: 'alarma', clase: 'mis__g--hoy', vacio: 'Nada vence hoy.', filtro: function (r) { return esActivo(r) && r.fecha_limite === hoy; } },
+        { clave: 'atender', titulo: 'Por atender', icono: 'reloj', clase: '', vacio: 'Nada más por atender.', filtro: function (r) { return esActivo(r) && !(r.fecha_limite && r.fecha_limite <= hoy); } },
+        { clave: 'otros', titulo: 'Atendidos, concluidos o sin estatus', icono: 'check', clase: 'mis__g--otros', vacio: 'Nada aquí todavía.', filtro: function (r) { return !esActivo(r); } }
+      ];
+      if (!m.asuntos.length) {
+        cont.appendChild(h('div', { class: 'tarjeta vacio' }, h('strong', null, 'No tienes asuntos turnados'),
+          'Cuando alguien te turne un oficio desde «Seguimiento», aparecerá aquí.'));
+        return;
+      }
+      grupos.forEach(function (g) {
+        var lista = m.asuntos.filter(g.filtro);
+        if (!lista.length && g.clave === 'otros') return;
+        var limite = g.clave === 'otros' ? 50 : 200;
+        cont.appendChild(h('section', { class: 'tarjeta mis__g ' + g.clase },
+          h('h2', null, icono(g.icono), g.titulo, h('span', { class: 'ins' }, lista.length)),
+          lista.length ? lista.slice(0, limite).map(function (r) {
+            var per = lineas(r.tipo === 'OFS' ? r.dirigido_a : r.firma).primera;
+            return h('div', { class: 'pend__i', tabindex: '0', onclick: function () { abrirDetalle(r.id); }, onkeydown: function (ev) { if (ev.key === 'Enter') abrirDetalle(r.id); } },
+              h('div', null, h('div', { class: 't-num' }, etiquetaNum(r)), h('div', { class: 'pend__tipo' }, tipoDef(r.tipo).singular)),
+              h('div', null, h('div', null, r.asunto || 'Sin asunto'), h('div', { class: 'item__meta' }, [r.numero, per, r.fecha_limite ? 'Límite: ' + fechaCorta(r.fecha_limite) : null, fechaCorta(r.fecha_recepcion || r.fecha)].filter(Boolean).join(' · '))),
+              h('div', { style: { display: 'grid', gap: '4px', justifyItems: 'end' } }, r.estatus ? insEstatus(r.estatus) : null, insVence(r)));
+          }) : h('div', { class: 'vacio' }, g.vacio),
+          lista.length > limite ? h('div', { class: 'vacio' }, 'Y ' + (lista.length - limite) + ' más.') : null));
+      });
+      if (m.total > m.asuntos.length) cont.appendChild(h('p', { class: 'conteo' }, 'Se muestran los ' + m.asuntos.length + ' más recientes de ' + m.total + '.'));
+    }).catch(function (e) { fallo(e); vaciar(cont).appendChild(h('div', { class: 'tarjeta vacio' }, e.message)); });
+  };
+
+  /* ───────────────────────── Informes ───────────────────────── */
+  // Gráficas en SVG hechas a mano (sin librerías). Se dibujan al ancho real del
+  // contenedor (así el texto se lee igual en celular) y se vuelven a dibujar al
+  // cambiar el tamaño de la ventana. Los nombres y números van como texto (textContent).
+  var SVGNS = 'http://www.w3.org/2000/svg';
+  var MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+  var HEX_TIPO = { OFS: '#8f4889', OFE: '#027a35', OFC: '#266cb4', CIR: '#9d2148', TAR: '#95600f', VOL: '#b81f72' };
+  // Colores de estado: siempre con su ícono, su nombre y su número (nunca solos).
+  // Revisados con el validador de daltonismo: verde/ámbar/rojo se distinguen también
+  // con protanopía y deuteranopía; el ámbar es claro, por eso su ícono va en tinta oscura.
+  var ESTADO = {
+    aTiempo: { color: '#027a35', tinta: '#fff', txt: 'A tiempo', marca: '✓' },
+    tarde: { color: '#d9a21b', tinta: '#3b2a00', txt: 'Fuera de plazo', marca: '!' },
+    vencido: { color: '#c4103f', tinta: '#fff', txt: 'Vencido sin atender', marca: '✕' }
+  };
+  var TINTA = '#2d2a2e', TINTA2 = '#55585a', TINTA3 = '#7b7e80', REJILLA = '#ece4eb';
+
+  function sv(tag, attrs) {
+    var el = document.createElementNS(SVGNS, tag);
+    Object.keys(attrs || {}).forEach(function (k) { if (attrs[k] !== null && attrs[k] !== undefined) el.setAttribute(k, attrs[k]); });
+    for (var i = 2; i < arguments.length; i++) {
+      var c = arguments[i];
+      if (c === null || c === undefined) continue;
+      el.appendChild(typeof c === 'string' || typeof c === 'number' ? document.createTextNode(String(c)) : c);
+    }
+    return el;
+  }
+  function numero(n) { return Number(n || 0).toLocaleString('es-MX'); }
+  function decimal(n) { return n === null || n === undefined ? '—' : Number(n).toLocaleString('es-MX', { maximumFractionDigits: 1 }); }
+  function mesLargo(m) { var p = m.split('-'); return MESES[Number(p[1]) - 1] + ' ' + p[0]; }
+  function mesCorto(m, conAnio) { var p = m.split('-'); var t = MESES[Number(p[1]) - 1].slice(0, 3); t = t.charAt(0).toUpperCase() + t.slice(1); return conAnio ? t + ' ' + p[0].slice(2) : t; }
+  function tope(max) {   // máximo «redondo» para el eje
+    if (max <= 4) return Math.max(1, max);
+    var p = Math.pow(10, Math.floor(Math.log10(max))), pasos = [1, 2, 2.5, 5, 10];
+    for (var i = 0; i < pasos.length; i++) if (pasos[i] * p >= max) return pasos[i] * p;
+    return 10 * p;
+  }
+  /** Columna con la punta redondeada (4 px) y la base recta. */
+  function columna(x, y, w, alto, color) {
+    var r = Math.min(4, w / 2, alto);
+    return sv('path', { d: 'M' + x + ',' + (y + alto) + 'V' + (y + r) + 'Q' + x + ',' + y + ' ' + (x + r) + ',' + y + 'H' + (x + w - r) + 'Q' + (x + w) + ',' + y + ' ' + (x + w) + ',' + (y + r) + 'V' + (y + alto) + 'Z', fill: color });
+  }
+  /** Un solo globo de ayuda por gráfica; se muestra al pasar el mouse, al tocar o con el teclado. */
+  function globo(envoltura) {
+    var tip = h('div', { class: 'tip', role: 'tooltip' });
+    envoltura.appendChild(tip);
+    return {
+      mostrar: function (x, y, contenido) {
+        vaciar(tip); agregar(tip, contenido); tip.classList.add('tip--on');
+        var w = tip.offsetWidth, hh = tip.offsetHeight, W = envoltura.clientWidth;
+        tip.style.left = Math.max(2, Math.min(W - w - 2, x - w / 2)) + 'px';
+        tip.style.top = Math.max(0, y - hh - 10) + 'px';
+      },
+      ocultar: function () { tip.classList.remove('tip--on'); }
+    };
+  }
+
+  /**
+   * Columnas por mes. datos = [{ etiqueta, valor, ayuda: Node[] }]
+   * o = { color, alto, mini, nombre }
+   */
+  function graficaColumnas(cont, datos, o) {
+    vaciar(cont);
+    var W = Math.max(240, cont.clientWidth || 600), H = o.alto || 220;
+    var izq = o.mini ? 26 : 36, der = 8, arriba = 18, abajo = 22;
+    var pw = W - izq - der, ph = H - arriba - abajo;
+    var max = tope(Math.max.apply(null, datos.map(function (d) { return d.valor; }).concat([0])));
+    var y = function (v) { return arriba + ph - (v / max) * ph; };
+    var banda = pw / Math.max(1, datos.length), ancho = Math.max(2, Math.min(24, banda * 0.66));
+    var svg = sv('svg', { width: W, height: H, viewBox: '0 0 ' + W + ' ' + H, role: 'img', 'aria-label': o.nombre || 'Gráfica', class: 'graf' });
+    var marcas = o.mini ? [0, max] : [0, max / 2, max];
+    marcas.forEach(function (v) {
+      svg.appendChild(sv('line', { x1: izq, x2: W - der, y1: y(v), y2: y(v), stroke: REJILLA, 'stroke-width': 1, 'shape-rendering': 'crispEdges' }));
+      svg.appendChild(sv('text', { x: izq - 6, y: y(v) + 4, 'text-anchor': 'end', 'font-size': 11, fill: TINTA3 }, numero(v)));
+    });
+    var iMax = -1, vMax = -1;
+    datos.forEach(function (d, i) { if (d.valor > vMax) { vMax = d.valor; iMax = i; } });
+    var cadaCuanto = o.mini ? Math.max(1, datos.length - 1) : Math.ceil(datos.length / Math.max(1, Math.floor(pw / 42)));
+    var tip = globo(cont);
+    datos.forEach(function (d, i) {
+      var cx = izq + banda * i + banda / 2;
+      if (d.valor > 0) svg.appendChild(columna(cx - ancho / 2, y(d.valor), ancho, arriba + ph - y(d.valor), o.color));
+      // Etiquetas selectivas: el máximo y el último (el resto, en el globo y en la tabla)
+      if (d.valor > 0 && (i === iMax || (i === datos.length - 1 && !o.mini))) {
+        svg.appendChild(sv('text', { x: cx, y: y(d.valor) - 5, 'text-anchor': 'middle', 'font-size': 11, 'font-weight': 600, fill: TINTA }, numero(d.valor)));
+      }
+      if (i % cadaCuanto === 0 || i === datos.length - 1) {
+        svg.appendChild(sv('text', { x: cx, y: H - 6, 'text-anchor': 'middle', 'font-size': 11, fill: TINTA3 }, d.etiqueta));
+      }
+      var zona = sv('rect', { x: izq + banda * i, y: arriba, width: banda, height: ph, fill: 'transparent', tabindex: 0, class: 'graf__zona',
+        'aria-label': d.etiquetaLarga + ': ' + numero(d.valor) });
+      var ver = function () { tip.mostrar(cx, y(d.valor), d.ayuda); zona.classList.add('activa'); };
+      var quitar = function () { tip.ocultar(); zona.classList.remove('activa'); };
+      zona.addEventListener('pointerenter', ver); zona.addEventListener('pointerdown', ver); zona.addEventListener('focus', ver);
+      // Con el dedo, el globo se queda hasta tocar otra parte (si no, se borraría al soltar)
+      zona.addEventListener('pointerleave', function (ev) { if (ev.pointerType !== 'touch') quitar(); });
+      zona.addEventListener('blur', quitar);
+      svg.appendChild(zona);
+    });
+    svg.appendChild(sv('line', { x1: izq, x2: W - der, y1: arriba + ph, y2: arriba + ph, stroke: '#cdbccb', 'stroke-width': 1, 'shape-rendering': 'crispEdges' }));
+    cont.insertBefore(svg, cont.firstChild);
+  }
+
+  /** Barras horizontales (ranking): nombre arriba (puede ocupar dos renglones), barra y número. */
+  function barrasH(cont, items, o) {
+    vaciar(cont);
+    if (!items.length) { cont.appendChild(h('p', { class: 'inf__vacio' }, o.vacio || 'Sin datos en este periodo.')); return; }
+    var max = Math.max.apply(null, items.map(function (x) { return x.n; }).concat([1]));
+    items.forEach(function (x) {
+      var fila = h('div', { class: 'hb' }, h('div', { class: 'hb__nombre' }, x.nombre), h('div', { class: 'hb__barra' }), h('div', { class: 'hb__n' }, numero(x.n)));
+      cont.appendChild(fila);
+      var caja = fila.children[1], W = Math.max(40, caja.clientWidth || 200), w = Math.max(3, (x.n / max) * W);
+      var svg = sv('svg', { width: W, height: 12, viewBox: '0 0 ' + W + ' 12', 'aria-hidden': 'true' },
+        sv('rect', { x: 0, y: 0, width: W, height: 12, rx: 4, fill: '#f4ebf3' }),
+        x.n ? sv('rect', { x: 0, y: 0, width: w, height: 12, rx: Math.min(4, w / 2), fill: o.color }) : null,
+        x.n ? sv('rect', { x: 0, y: 0, width: Math.min(4, w), height: 12, fill: o.color }) : null);
+      caja.appendChild(svg);
+    });
+  }
+
+  /** Barra de 100 % con los tres estados (con 2 px de separación) y su leyenda con números. */
+  function barraEstados(cont, a) {
+    vaciar(cont);
+    var claves = ['aTiempo', 'tarde', 'vencido'], total = claves.reduce(function (s, k) { return s + a[k]; }, 0);
+    if (!total) { cont.appendChild(h('p', { class: 'inf__vacio' }, 'Ningún asunto con fecha límite que ya se pueda evaluar en este periodo.')); return; }
+    var W = Math.max(200, cont.clientWidth || 400), H = 22, x = 0;
+    var svg = sv('svg', { width: W, height: H, viewBox: '0 0 ' + W + ' ' + H, role: 'img', class: 'graf',
+      'aria-label': claves.map(function (k) { return ESTADO[k].txt + ': ' + a[k]; }).join(', ') });
+    var activas = claves.filter(function (k) { return a[k] > 0; });
+    var util = W - 2 * (activas.length - 1);
+    activas.forEach(function (k, i) {
+      var w = Math.max(3, (a[k] / total) * util);
+      svg.appendChild(sv('rect', { x: x, y: 0, width: w, height: H, rx: 4, fill: ESTADO[k].color }));
+      if (i > 0) svg.appendChild(sv('rect', { x: x, y: 0, width: Math.min(4, w), height: H, fill: ESTADO[k].color }));
+      if (i < activas.length - 1) svg.appendChild(sv('rect', { x: x + w - Math.min(4, w), y: 0, width: Math.min(4, w), height: H, fill: ESTADO[k].color }));
+      x += w + 2;
+    });
+    cont.appendChild(svg);
+    cont.appendChild(h('ul', { class: 'inf__leyenda' }, claves.map(function (k) {
+      return h('li', null, h('span', { class: 'inf__marca', style: { background: ESTADO[k].color, color: ESTADO[k].tinta } }, ESTADO[k].marca),
+        h('strong', null, numero(a[k])), ' ', ESTADO[k].txt, h('span', { class: 'inf__pct' }, ' · ' + Math.round(a[k] / total * 100) + ' %'));
+    })));
+  }
+
+  function tablaDatos(titulo, columnas, filas) {
+    return h('details', { class: 'inf__tabla' }, h('summary', null, 'Ver los datos en tabla'),
+      h('div', { class: 'tabla-env', style: { display: 'block' } }, h('table', { class: 'tabla' }, h('caption', { class: 'sr' }, titulo),
+        h('thead', null, h('tr', null, columnas.map(function (c) { return h('th', null, c); }))),
+        h('tbody', null, filas.map(function (f) { return h('tr', { style: { cursor: 'default' } }, f.map(function (v) { return h('td', null, v); })); })))));
+  }
+
+  function hastaHoy() { return hoyIso(); }
+  function periodo(preset) {
+    var hoy = hoyIso(), a = Number(hoy.slice(0, 4)), m = Number(hoy.slice(5, 7));
+    if (preset === 'mes') return [hoy.slice(0, 7) + '-01', hoy];
+    if (preset === '12m') { var mm = m - 11, aa = a; if (mm < 1) { mm += 12; aa--; } return [aa + '-' + ('0' + mm).slice(-2) + '-01', hoy]; }
+    if (preset === 'anterior') return [(a - 1) + '-01-01', (a - 1) + '-12-31'];
+    return [a + '-01-01', hastaHoy()];
+  }
+
+  var dibujarInformes = null;
+  document.addEventListener('pointerdown', function (ev) {
+    if (ev.target && ev.target.closest && ev.target.closest('.graf__zona')) return;
+    Array.prototype.forEach.call(document.querySelectorAll('.tip--on'), function (t) { t.classList.remove('tip--on'); });
+    Array.prototype.forEach.call(document.querySelectorAll('.graf__zona.activa'), function (z) { z.classList.remove('activa'); });
+  });
+  var esperaTamano = null;
+  window.addEventListener('resize', function () {
+    clearTimeout(esperaTamano);
+    esperaTamano = setTimeout(function () { if (E.vista === 'informes' && dibujarInformes) dibujarInformes(); }, 200);
+  });
+
+  vistas.informes = function () {
+    var cont = marco('informes');
+    cont.appendChild(h('div', { class: 'titulo-vista' }, h('h1', null, 'Informes'), h('span', { class: 'sub' }, 'Solo de tus libretas · sin registros cancelados')));
+    if (!tiene('informes')) {
+      cont.appendChild(h('div', { class: 'tarjeta vacio' }, h('strong', null, 'Sin acceso a Informes'), 'Pide a un administrador que te dé permiso, o falta publicar el servidor ' + VERSION_APP + '.'));
+      return;
+    }
+    var st = E.inf = E.inf || { preset: 'anio', tipos: E.ini.orden.slice(), datos: null };
+    if (st.preset !== 'personalizado') { var p = periodo(st.preset); st.desde = p[0]; st.hasta = p[1]; }
+    var preset = h('select', { class: 'entrada', 'aria-label': 'Periodo' },
+      [['anio', 'Este año'], ['12m', 'Últimos 12 meses'], ['mes', 'Este mes'], ['anterior', 'Año pasado'], ['personalizado', 'Otro periodo']].map(function (o) {
+        return h('option', { value: o[0], selected: o[0] === st.preset }, o[1]);
+      }));
+    var desde = h('input', { class: 'entrada', type: 'date', value: st.desde, 'aria-label': 'Desde', min: '2000-01-01', max: '2100-12-31' });
+    var hasta = h('input', { class: 'entrada', type: 'date', value: st.hasta, 'aria-label': 'Hasta', min: '2000-01-01', max: '2100-12-31' });
+    var libretas = h('div', { class: 'inf__libretas', role: 'group', 'aria-label': 'Libretas' }, E.ini.orden.map(function (t) {
+      var b = h('button', { type: 'button', class: 'inf__lib', 'aria-pressed': st.tipos.indexOf(t) >= 0 ? 'true' : 'false', onclick: function () {
+        var i = st.tipos.indexOf(t);
+        if (i >= 0 && st.tipos.length === 1) { aviso('Deja al menos una libreta.'); return; }
+        if (i >= 0) st.tipos.splice(i, 1); else st.tipos.push(t);
+        b.setAttribute('aria-pressed', i >= 0 ? 'false' : 'true');
+        cargar();
+      } }, h('span', { class: 'inf__punto', style: { background: HEX_TIPO[t] } }), E.ini.todosTipos[t].nombre);
+      return b;
+    }));
+    var excel = h('button', { class: 'btn', onclick: function () { excelInformes(); } }, icono('excel'), 'Excel');
+    preset.addEventListener('change', function () {
+      st.preset = preset.value;
+      if (st.preset !== 'personalizado') { var p = periodo(st.preset); st.desde = desde.value = p[0]; st.hasta = hasta.value = p[1]; cargar(); }
+      else desde.focus();
+    });
+    [desde, hasta].forEach(function (x) { x.addEventListener('change', function () {
+      if (!desde.value || !hasta.value) return;
+      st.preset = 'personalizado'; preset.value = 'personalizado'; st.desde = desde.value; st.hasta = hasta.value; cargar();
+    }); });
+    var zona = h('div', { class: 'inf' });
+    cont.appendChild(h('div', { class: 'inf__filtros' }, h('div', { class: 'inf__periodo' }, preset, desde, h('span', { class: 'inf__a' }, 'a'), hasta), excel));
+    cont.appendChild(libretas);
+    cont.appendChild(zona);
+    var pedido = 0;
+    function cargar() {
+      var n = ++pedido;
+      zona.classList.add('inf--cargando');
+      if (!st.datos) vaciar(zona).appendChild(h('div', { class: 'tarjeta vacio' }, 'Calculando…'));
+      llamar('informes', { desde: st.desde, hasta: st.hasta, tipos: st.tipos }).then(function (d) {
+        if (n !== pedido) return;
+        st.datos = d; pintar(d);
+      }).catch(function (e) { if (n === pedido) { fallo(e); if (!st.datos) vaciar(zona).appendChild(h('div', { class: 'tarjeta vacio' }, e.message)); } })
+        .then(function () { if (n === pedido) zona.classList.remove('inf--cargando'); });
+    }
+    function tarjeta(titulo, sub, cuerpo, extra) {
+      return h('section', { class: 'tarjeta inf__t' + (extra || '') }, h('h2', null, titulo), sub ? h('p', { class: 'inf__sub' }, sub) : null, cuerpo);
+    }
+    function pintar(d) {
+      vaciar(zona);
+      var r = d.respuesta, a = d.aTiempo, multiAnio = d.desde.slice(0, 4) !== d.hasta.slice(0, 4);
+      // Indicadores (números grandes)
+      zona.appendChild(h('div', { class: 'inf__kpis' },
+        h('div', { class: 'kpi' }, h('span', { class: 'kpi__t' }, 'Registros'), h('strong', { class: 'kpi__v' }, numero(d.total)),
+          h('span', { class: 'kpi__d' }, 'del ' + fechaCorta(d.desde) + ' al ' + fechaCorta(d.hasta))),
+        h('div', { class: 'kpi' }, h('span', { class: 'kpi__t' }, 'Respondidos con oficio'), h('strong', { class: 'kpi__v' }, numero(r.casos)),
+          h('span', { class: 'kpi__d' }, 'de ' + numero(r.recibidos) + ' recibidos en el periodo')),
+        h('div', { class: 'kpi' }, h('span', { class: 'kpi__t' }, 'Tiempo promedio de respuesta'), h('strong', { class: 'kpi__v' }, r.promedio === null ? '—' : decimal(r.promedio)),
+          h('span', { class: 'kpi__d' }, r.promedio === null ? 'sin respuestas con oficio' : 'días hábiles · mediana ' + decimal(r.mediana))),
+        h('div', { class: 'kpi' }, h('span', { class: 'kpi__t' }, 'Atendido a tiempo'), h('strong', { class: 'kpi__v' }, a.porcentaje === null ? '—' : decimal(a.porcentaje) + ' %'),
+          h('span', { class: 'kpi__d' }, a.porcentaje === null ? 'sin fechas límite que evaluar' : numero(a.aTiempo) + ' de ' + numero(a.aTiempo + a.tarde + a.vencido) + ' con fecha límite'))));
+      // 1 · Por mes (total) y por libreta (una gráfica chica por libreta)
+      var gMes = h('div', { class: 'graf-env' });
+      zona.appendChild(tarjeta('Registros por mes', 'Todas las libretas elegidas. Toca una columna para ver el detalle.', [gMes,
+        tablaDatos('Registros por mes', ['Mes'].concat(d.tipos.map(function (t) { return E.ini.todosTipos[t].nombre; })).concat(['Total']),
+          d.porMes.map(function (m) { return [mesLargo(m.mes)].concat(d.tipos.map(function (t) { return numero(m.porTipo[t]); })).concat([numero(m.total)]); }))]));
+      var multiples = h('div', { class: 'inf__multiples' });
+      zona.appendChild(tarjeta('Por libreta', 'Cada libreta con su propia escala.', multiples));
+      var minis = d.tipos.map(function (t) {
+        var g = h('div', { class: 'graf-env graf-env--mini' });
+        multiples.appendChild(h('div', { class: 'inf__mini' }, h('h3', null, h('span', { class: 'inf__punto', style: { background: HEX_TIPO[t] } }), E.ini.todosTipos[t].nombre,
+          h('span', { class: 'inf__mini-n' }, numero(d.totalesTipo[t]))), g));
+        return { t: t, g: g };
+      });
+      // 2 · Remitentes y destinatarios
+      var gRem = h('div', { class: 'hbs' }), gDes = h('div', { class: 'hbs' });
+      zona.appendChild(h('div', { class: 'inf__dos' },
+        tarjeta('Principales remitentes', d.remitentes.total ? numero(d.remitentes.distintos) + ' remitentes distintos en ' + numero(d.remitentes.total) + ' documentos recibidos' : 'De lo que se recibe (entrantes, conocimiento, circulares, tarjetas y volantes)', gRem),
+        tarjeta('Principales destinatarios', d.destinatarios.total ? numero(d.destinatarios.distintos) + ' destinatarios distintos en ' + numero(d.destinatarios.total) + ' oficios salientes' : 'De los oficios salientes', gDes)));
+      // 3 · Tiempo de respuesta
+      var gDist = h('div', { class: 'hbs' });
+      zona.appendChild(h('div', { class: 'inf__dos' },
+        tarjeta('Tiempo de respuesta', 'Del día en que se recibió al oficio que lo contestó («Responder con oficio»), en días hábiles. No descuenta días festivos.', [
+          h('div', { class: 'inf__cifras' },
+            h('div', null, h('strong', null, decimal(r.promedio)), h('span', null, 'promedio')),
+            h('div', null, h('strong', null, decimal(r.mediana)), h('span', null, 'mediana')),
+            h('div', null, h('strong', null, r.maximo === null ? '—' : numero(r.maximo)), h('span', null, 'el más tardado')),
+            h('div', null, h('strong', null, numero(r.casos)), h('span', null, 'casos'))),
+          h('p', { class: 'inf__sub', style: { margin: '10px 0 6px' } }, 'Cuántos se contestaron en…'), gDist]),
+        tarjeta('Atendido a tiempo', 'Asuntos con fecha límite dentro del periodo: si pasaron a «Atendido» o «Concluido» a más tardar ese día.', [
+          h('div', { class: 'inf__grande' }, h('strong', null, a.porcentaje === null ? '—' : decimal(a.porcentaje) + ' %'), h('span', null, 'a tiempo')),
+          (function () { var x = h('div', { class: 'inf__estados' }); x.id = 'inf-estados'; return x; })(),
+          h('p', { class: 'inf__nota' }, 'No cuentan: ' + numero(a.enPlazo) + ' que todavía están en plazo' + (a.sinDato ? ' y ' + numero(a.sinDato) + ' atendidos sin fecha de atención registrada' : '') + '.')])));
+      dibujarInformes = function () {
+        if (!document.body.contains(gMes)) return;
+        graficaColumnas(gMes, d.porMes.map(function (m) {
+          return { etiqueta: mesCorto(m.mes, multiAnio), etiquetaLarga: mesLargo(m.mes), valor: m.total,
+            ayuda: [h('strong', { class: 'tip__v' }, numero(m.total) + ' registros'), h('span', { class: 'tip__t' }, mesLargo(m.mes))].concat(d.tipos.filter(function (t) { return m.porTipo[t]; }).map(function (t) {
+              return h('span', { class: 'tip__f' }, h('i', { style: { background: HEX_TIPO[t] } }), numero(m.porTipo[t]) + ' · ' + E.ini.todosTipos[t].nombre);
+            })) };
+        }), { color: '#8f4889', alto: 230, nombre: 'Registros por mes' });
+        minis.forEach(function (x) {
+          graficaColumnas(x.g, d.porMes.map(function (m) {
+            return { etiqueta: mesCorto(m.mes, multiAnio), etiquetaLarga: mesLargo(m.mes), valor: m.porTipo[x.t] || 0,
+              ayuda: [h('strong', { class: 'tip__v' }, numero(m.porTipo[x.t] || 0)), h('span', { class: 'tip__t' }, mesLargo(m.mes))] };
+          }), { color: HEX_TIPO[x.t], alto: 120, mini: true, nombre: E.ini.todosTipos[x.t].nombre + ' por mes' });
+        });
+        barrasH(gRem, d.remitentes.lista, { color: '#027a35', vacio: 'Sin documentos recibidos en este periodo (o no elegiste esas libretas).' });
+        barrasH(gDes, d.destinatarios.lista, { color: '#8f4889', vacio: 'Sin oficios salientes en este periodo (o no elegiste esa libreta).' });
+        barrasH(gDist, r.casos ? r.distribucion.map(function (x) { return { nombre: x.rango + ' días hábiles', n: x.n }; }) : [],
+          { color: '#266cb4', vacio: 'Ningún documento de este periodo se contestó con «Responder con oficio».' });
+        barraEstados(document.getElementById('inf-estados'), a);
+      };
+      dibujarInformes();
+      // tablas de datos (accesibles sin gráficas)
+      gRem.parentNode.appendChild(tablaDatos('Remitentes', ['Remitente', 'Documentos'], d.remitentes.lista.map(function (x) { return [x.nombre, numero(x.n)]; })));
+      gDes.parentNode.appendChild(tablaDatos('Destinatarios', ['Destinatario', 'Oficios'], d.destinatarios.lista.map(function (x) { return [x.nombre, numero(x.n)]; })));
+    }
+    if (st.datos && st.datos.desde === st.desde && st.datos.hasta === st.hasta) pintar(st.datos);
+    cargar();
+  };
+
+  /** Excel de Informes: resumen, por mes, rankings y el detalle (queda en la bitácora). */
+  function excelInformes() {
+    var st = E.inf;
+    llamar('informes', { desde: st.desde, hasta: st.hasta, tipos: st.tipos, excel: true }).then(function (d) {
+      var enc = E.ini.config.encabezados || [];
+      var ahora = new Date(), cuando = fechaCorta(hoyIso()) + ' ' + ('0' + ahora.getHours()).slice(-2) + ':' + ('0' + ahora.getMinutes()).slice(-2);
+      var tit = function (t) { return enc.concat(['Control de Gestión · Informes · ' + t, 'Del ' + fechaCorta(d.desde) + ' al ' + fechaCorta(d.hasta) + ' · ' + d.tipos.map(function (x) { return E.ini.todosTipos[x].nombre; }).join(', ') + ' · generado el ' + cuando + ' por ' + E.ini.yo.nombre]); };
+      var r = d.respuesta, a = d.aTiempo;
+      var RES = { aTiempo: 'A tiempo', tarde: 'Fuera de plazo', vencido: 'Vencido sin atender', enPlazo: 'Aún en plazo', sinDato: 'Sin fecha de atención' };
+      var hojas = [
+        { nombre: 'Resumen', titulos: tit('Resumen'), encabezados: ['Indicador', 'Valor'], anchos: [46, 18], tipos: ['texto', 'numero'], filas: [
+          ['Registros en el periodo', d.total]].concat(d.tipos.map(function (t) { return ['  ' + E.ini.todosTipos[t].nombre, d.totalesTipo[t]]; })).concat([
+          ['Recibidos en el periodo', r.recibidos], ['Respondidos con oficio', r.casos],
+          ['Tiempo promedio de respuesta (días hábiles)', r.promedio === null ? '' : r.promedio], ['Mediana (días hábiles)', r.mediana === null ? '' : r.mediana],
+          ['Respuesta más tardada (días hábiles)', r.maximo === null ? '' : r.maximo],
+          ['Con fecha límite en el periodo', a.conLimite], ['A tiempo', a.aTiempo], ['Fuera de plazo', a.tarde], ['Vencidos sin atender', a.vencido],
+          ['Aún en plazo (no cuentan)', a.enPlazo], ['Atendidos sin fecha de atención (no cuentan)', a.sinDato], ['Porcentaje atendido a tiempo', a.porcentaje === null ? '' : a.porcentaje]]),
+          pie: 'No cuenta registros cancelados. Días hábiles = lunes a viernes, sin descontar días festivos.' },
+        { nombre: 'Por mes', titulos: tit('Registros por mes'), encabezados: ['Mes'].concat(d.tipos.map(function (t) { return E.ini.todosTipos[t].nombre; })).concat(['Total']),
+          anchos: [16].concat(d.tipos.map(function () { return 14; })).concat([10]), tipos: ['texto'].concat(d.tipos.map(function () { return 'numero'; })).concat(['numero']),
+          filas: d.porMes.map(function (m) { return [mesLargo(m.mes)].concat(d.tipos.map(function (t) { return m.porTipo[t]; })).concat([m.total]); }) },
+        { nombre: 'Remitentes', titulos: tit('Principales remitentes'), encabezados: ['Remitente', 'Documentos'], anchos: [50, 12], tipos: ['texto', 'numero'],
+          filas: d.remitentes.lista.map(function (x) { return [x.nombre, x.n]; }) },
+        { nombre: 'Destinatarios', titulos: tit('Principales destinatarios'), encabezados: ['Destinatario', 'Oficios'], anchos: [50, 12], tipos: ['texto', 'numero'],
+          filas: d.destinatarios.lista.map(function (x) { return [x.nombre, x.n]; }) },
+        { nombre: 'Tiempo de respuesta', titulos: tit('Tiempo de respuesta'), encabezados: ['Recibido', 'No. de oficio', 'Asunto', 'Fecha de recepción', 'Respondido con', 'No. oficial', 'Fecha del oficio', 'Días hábiles'],
+          anchos: [24, 22, 46, 13, 24, 22, 13, 11], tipos: ['texto', 'texto', 'texto', 'fecha', 'texto', 'texto', 'fecha', 'numero'],
+          filas: r.pares.map(function (p) { return [p.recibido, p.numero, p.asunto, p.recepcion, p.respuesta, p.numero_respuesta, p.fecha_respuesta, p.dias]; }) },
+        { nombre: 'A tiempo', titulos: tit('Atendido a tiempo'), encabezados: ['Registro', 'No. de oficio', 'Asunto', 'Estatus', 'Fecha límite', 'Fecha de atención', 'De dónde salió la fecha', 'Resultado'],
+          anchos: [24, 22, 46, 12, 13, 13, 18, 18], tipos: ['texto', 'texto', 'texto', 'centro', 'fecha', 'fecha', 'texto', 'texto'],
+          filas: a.detalle.map(function (x) { return [x.registro, x.numero, x.asunto, x.estatus, x.fecha_limite, x.fecha_atencion, x.fuente, RES[x.resultado] || x.resultado]; }) }
+      ];
+      descargarBytes(ExcelCG.libro(hojas), 'Informes Control de Gestión ' + d.desde + ' a ' + d.hasta + '.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    }).catch(fallo);
+  }
 
   /* ───────────────────────── Directorio ───────────────────────── */
   vistas.directorio = function () {
@@ -1324,7 +2246,7 @@
           h('tbody', null, us.map(function (u) {
             return h('tr', { style: { cursor: 'default' } },
               h('td', null, h('strong', null, u.usuario)), h('td', null, u.nombre), h('td', null, E.ini.roles[u.rol] || u.rol),
-              h('td', null, libretasTxt(u.tipos)),
+              h('td', null, libretasTxt(u.tipos), u.informes === 'SI' && u.rol !== 'admin' ? h('span', { class: 'etq etq--inf' }, 'Informes') : null),
               h('td', null, u.activo === 'SI' ? h('span', { class: 'etq' }, 'Activo') : h('span', { class: 'etq etq--gris' }, 'Inactivo'),
                 u.bloqueado ? h('span', { class: 'etq etq--rojo' }, 'Bloqueado') : null, u.debe_cambiar === 'SI' ? h('span', { class: 'etq etq--gris' }, 'Contraseña temporal') : null),
               h('td', { class: 't-fecha' }, u.ultimo_acceso ? fechaCorta(u.ultimo_acceso) + ' ' + String(u.ultimo_acceso).slice(11, 16) : 'Nunca'),
@@ -1359,19 +2281,25 @@
       var bloqueLib = h('fieldset', { class: 'grupo' }, h('legend', null, 'Libretas que puede ver'),
         h('div', { class: 'rejilla' }, cajas.map(function (c) { return h('label', { class: 'casilla' }, c.el, E.ini.todosTipos[c.t].nombre); })));
       var activo = h('input', { type: 'checkbox', checked: !u || u.activo === 'SI' });
+      // Informes: solo si el servidor ya lo sabe manejar (si no, no se manda y se conserva)
+      // (a un administrador no se le marca: si lo bajan de rol, no se queda con Informes sin que alguien lo elija)
+      var informes = tiene('informes') ? h('input', { type: 'checkbox', checked: !!(u && u.rol !== 'admin' && u.informes === 'SI') }) : null;
+      var campoInformes = informes ? h('label', { class: 'casilla' }, informes, 'Puede ver Informes (gráficas y números de sus libretas)') : null;
       var desbloquear = u && u.bloqueado ? h('input', { type: 'checkbox', checked: true }) : null;
       var msg = h('div');
       function pintarRol() {
         descRol.textContent = { admin: 'Todo: registros de todas las libretas, cancelar, usuarios, bitácora y configuración.',
           captura: 'Registra y edita en sus libretas, sube archivos y agrega personas al directorio.',
-          consulta: 'Solo ve, busca, abre archivos y descarga Excel de sus libretas.' }[rol.value];
+          consulta: 'Solo ve, busca, abre archivos y descarga Excel de sus libretas.' }[rol.value] + (rol.value === 'admin' && informes ? ' Los administradores siempre ven Informes.' : '');
         bloqueLib.classList.toggle('oculto', rol.value === 'admin');
+        if (campoInformes) campoInformes.classList.toggle('oculto', rol.value === 'admin');
       }
       rol.addEventListener('change', pintarRol); pintarRol();
       var v = ventana({ titulo: nuevo ? 'Nuevo usuario' : 'Editar ' + u.usuario, ancho: 620, cuerpo: [msg,
         h('div', { class: 'rejilla' }, campo('Usuario', usuario, { req: true, ayuda: nuevo ? 'Minúsculas, sin espacios ni acentos. No se puede cambiar después.' : null }), campo('Nombre completo', nombre, { req: true }),
           h('div', { class: 'campo ancho' }, campo('Rol', rol), descRol)),
         bloqueLib,
+        campoInformes,
         nuevo ? null : h('label', { class: 'casilla' }, activo, 'Cuenta activa'),
         desbloquear ? h('label', { class: 'casilla' }, desbloquear, 'Desbloquear (tiene intentos fallidos)') : null,
         nuevo ? h('div', { class: 'campo__ayuda' }, 'Se generará una contraseña temporal que tendrá que cambiar al entrar.') : h('div', { class: 'campo__ayuda' }, 'Si cambias rol, libretas o estado, tendrá que volver a entrar.')],
@@ -1380,8 +2308,9 @@
             var tipos = rol.value === 'admin' ? '*' : cajas.filter(function (c) { return c.el.checked; }).map(function (c) { return c.t; });
             if (Array.isArray(tipos) && tipos.length === cajas.length) tipos = '*';
             llamar('guardarUsuario', { nuevo: nuevo, usuario: usuario.value, nombre: nombre.value, rol: rol.value, tipos: tipos,
-              activo: activo.checked ? 'SI' : 'NO', desbloquear: desbloquear ? desbloquear.checked : false }).then(function (r) {
-              v.cerrar(); cargar();
+              activo: activo.checked ? 'SI' : 'NO', desbloquear: desbloquear ? desbloquear.checked : false,
+              informes: informes ? informes.checked : undefined }).then(function (r) {
+              v.cerrar(); cargar(); cacheTurno = {};
               if (r.temporal) credenciales(r.usuario, r.temporal, 'Usuario creado'); else aviso('Usuario actualizado.', 'ok');
             }).catch(function (e) { vaciar(msg).appendChild(h('div', { class: 'alerta alerta--error' }, e.message)); });
           } }, nuevo ? 'Crear usuario' : 'Guardar')] });
@@ -1445,6 +2374,12 @@
             aviso('Configuración guardada.', 'ok');
           }).catch(fallo);
         } }, 'Guardar'))),
+      tiene('mantenimiento') ? tarjetaMantenimiento() : null,
+      tiene('respaldo') ? h('div', { class: 'tarjeta config', style: { marginTop: '16px' } },
+        h('h2', { class: 'config__t' }, icono('respaldo'), 'Respaldo completo'),
+        h('p', { class: 'config__d' }, 'Un Excel con una hoja por pestaña de la base: Registros, Directorio, Usuarios (sin contraseñas), Bitácora y Configuración. Queda anotado en la Bitácora.'),
+        h('p', { class: 'config__d' }, 'Guárdalo en un lugar seguro: trae datos personales. Los escaneos no van en el Excel; siguen en la carpeta «Archivos» del Drive de la cuenta dueña, y cada lunes se hace además una copia de la hoja en «Respaldos».'),
+        h('div', null, h('button', { class: 'btn btn--prim', onclick: function () { descargarRespaldo(this); } }, icono('bajar'), 'Descargar respaldo completo'))) : null,
       h('div', { class: 'tarjeta config', style: { marginTop: '16px' } }, h('h2', { style: { fontSize: '16px' } }, 'Seguridad'),
         h('ul', { style: { margin: 0, paddingLeft: '18px', display: 'grid', gap: '6px', color: 'var(--texto-2)' } },
           h('li', null, 'La hoja de cálculo y las carpetas de Drive del sistema no deben compartirse con nadie: todos entran por esta app.'),
@@ -1453,9 +2388,75 @@
           h('li', null, 'Cuando alguien deja el área: Usuarios → Editar → desmarca «Cuenta activa». Su historial se conserva.')))));
   };
 
+  /** Modo mantenimiento: solo los administradores pueden usar el sistema mientras está prendido. */
+  function tarjetaMantenimiento() {
+    var m = E.ini.mantenimiento || { activo: false, mensaje: '' };
+    var cont = h('div', { class: 'tarjeta config', style: { marginTop: '16px' } });
+    function pintar() {
+      var activo = !!m.activo;
+      var texto = h('textarea', { class: 'entrada', rows: 2, maxlength: 300, placeholder: 'Ej.: Estamos actualizando el sistema. Regresa a las 3 de la tarde.',
+        value: activo ? m.mensaje : '' });
+      var cuenta = h('span', { class: 'campo__ayuda' });
+      var contar = function () { cuenta.textContent = texto.value.length + ' de 300'; };
+      texto.addEventListener('input', contar); contar();
+      function guardar(prender) {
+        var msg = texto.value.trim();
+        if (prender && msg.length < 5) { aviso('Escribe el mensaje que verá la gente.', 'error'); texto.focus(); return; }
+        var seguir = prender && !activo ? confirmar('Mientras esté prendido, las personas que no son administradoras verán este mensaje y saldrán del sistema (en unos minutos, o en cuanto hagan algo). No podrán entrar hasta que lo apagues.\n\n¿Prender el modo mantenimiento?', { si: 'Prender', titulo: 'Modo mantenimiento' }) : Promise.resolve(true);
+        seguir.then(function (ok) {
+          if (!ok) return;
+          llamar('mantenimiento', { activo: prender, mensaje: msg }).then(function (r) {
+            m = r; E.ini.mantenimiento = r;
+            aviso(r.activo ? 'Modo mantenimiento prendido.' : 'Modo mantenimiento apagado: todos pueden entrar.', 'ok');
+            pintar();
+          }).catch(fallo);
+        });
+      }
+      vaciar(cont).appendChild(h('div', { class: 'mant' },
+        h('div', { class: 'mant__cab' }, h('h2', { class: 'config__t' }, icono('herramienta'), 'Modo mantenimiento'),
+          h('span', { class: 'mant__estado' + (activo ? ' mant__estado--on' : '') }, activo ? 'Prendido' : 'Apagado')),
+        h('p', { class: 'config__d' }, 'Úsalo cuando vayas a hacer cambios grandes. Mientras está prendido solo entran los administradores; los demás ven tu mensaje en la pantalla de entrada.'),
+        campo('Mensaje para la gente', texto, { ayuda: null }), cuenta,
+        h('div', { class: 'mant__botones' },
+          activo ? h('button', { class: 'btn btn--prim', onclick: function () { guardar(false); } }, 'Apagar mantenimiento') :
+            h('button', { class: 'btn btn--peligro-lleno', onclick: function () { guardar(true); } }, icono('herramienta'), 'Prender mantenimiento'),
+          activo ? h('button', { class: 'btn', onclick: function () { guardar(true); } }, 'Cambiar el mensaje') : null)));
+    }
+    pintar();
+    return cont;
+  }
+
+  /** Respaldo completo en Excel (se arma en el navegador con ExcelCG, sin librerías). */
+  function descargarRespaldo(boton) {
+    if (boton) { boton.disabled = true; }
+    llamar('respaldo').then(function (r) {
+      var NOMBRES = { Registros: 'Registros', Directorio: 'Directorio', Usuarios: 'Usuarios', Bitacora: 'Bitácora', Config: 'Configuración' };
+      var FECHAS = { fecha: 1, fecha_recepcion: 1, fecha_limite: 1 };
+      var NUMEROS = { anio: 1, consecutivo: 1, version: 1, intentos: 1 };
+      var ANCHOS_R = { asunto: 50, observaciones: 44, dirigido_a: 34, firma: 34, detalle: 70, nombre: 30, cargo: 30, dependencia: 26, valor: 40, descripcion: 50, origen: 30, area: 28, motivo_cancelacion: 30 };
+      var PIES = { Usuarios: 'Sin contraseñas ni sellos de sesión.', Registros: 'Sin los IDs internos de Drive: los escaneos están en la carpeta «Archivos» del Drive de la cuenta dueña.' };
+      var cuando = fechaCorta(r.generado) + ' ' + String(r.generado).slice(11, 16);
+      var hojas = Object.keys(r.hojas).map(function (k) {
+        var x = r.hojas[k];
+        return {
+          nombre: NOMBRES[k] || k,
+          titulos: (E.ini.config.encabezados || []).concat(['Control de Gestión · Respaldo completo · ' + (NOMBRES[k] || k),
+            x.filas.length + ' filas · generado el ' + cuando + ' por ' + E.ini.yo.nombre + ' · versión ' + r.version]),
+          encabezados: x.columnas,
+          anchos: x.columnas.map(function (c) { return ANCHOS_R[c] || 16; }),
+          tipos: x.columnas.map(function (c) { return FECHAS[c] ? 'fecha' : NUMEROS[c] ? 'numero' : 'texto'; }),
+          filas: x.filas,
+          pie: PIES[k] || 'Fuente: Control de Gestión.'
+        };
+      });
+      descargarBytes(ExcelCG.libro(hojas), 'Respaldo Control de Gestión ' + String(r.generado).slice(0, 10) + '.xlsx',
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    }).catch(fallo).then(function () { if (boton) boton.disabled = false; });
+  }
+
   /* ───────────────────────── Arranque ───────────────────────── */
   llamar('estado').then(function (p) {
-    E.publico = p;
+    E.publico = p; E.publicoEn = Date.now();
     if (E.token) cargarInicio(); else pantallaEntrar();
   }).catch(function (e) {
     vaciar(app).appendChild(h('div', { class: 'arranque' }, h('div', { class: 'arranque__marca' }, 'Control de Gestión'),
