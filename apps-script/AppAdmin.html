@@ -1,0 +1,407 @@
+<script>
+  /* Control de Gestión · Directorio, Usuarios, Bitácora, Configuración y Mi cuenta. Es una parte de la app: se junta con las demás App*.html (ver FRAGMENTOS_APP en Servidor.gs). */
+  /* ───────────────────────── Directorio ───────────────────────── */
+  vistas.directorio = function () {
+    var q = h('input', { class: 'entrada', type: 'search', placeholder: 'Buscar nombre, cargo o dependencia…', 'aria-label': 'Buscar en el directorio' });
+    var lista = h('div', { class: 'tarjeta lista-simple' }, h('div', { class: 'vacio' }, 'Cargando…'));
+    var conteo = h('p', { class: 'conteo' });
+    var datos = [];
+    marco('directorio').appendChild(h('div', null,
+      h('div', { class: 'titulo-vista' }, h('h1', null, 'Directorio'), h('span', { class: 'sub' }, 'Personas a quienes se dirige o que firman'), h('div', { class: 'titulo-vista__esp' }),
+        puedeCapturar() ? h('button', { class: 'btn btn--prim', onclick: function () { modalPersona({}).then(function (p) { if (p) cargar(); }); } }, icono('mas'), 'Agregar persona') : null),
+      h('div', { class: 'herr' }, h('div', { class: 'buscador' }, icono('buscar'), q)), conteo, lista));
+    function pintar() {
+      var pal = norm(q.value).split(' ').filter(Boolean);
+      var vis = datos.filter(function (p) { var b = norm(p.nombre + ' ' + p.cargo + ' ' + p.dependencia); return pal.every(function (w) { return b.indexOf(w) >= 0; }); });
+      conteo.textContent = vis.length + ' de ' + datos.length + ' personas';
+      vaciar(lista);
+      if (!vis.length) { lista.appendChild(h('div', { class: 'vacio' }, 'Sin coincidencias.')); return; }
+      vis.slice(0, 300).forEach(function (p) {
+        lista.appendChild(h('div', { class: 'fila' },
+          h('div', { class: 'fila__txt' }, h('strong', null, p.nombre), h('span', null, [p.cargo, p.dependencia].filter(Boolean).join(' · ') || 'Sin cargo'),
+            p.activo === 'NO' ? h('span', null, h('span', { class: 'etq etq--gris' }, p.unido_a ? 'Unida a otra ficha' : 'Desactivada')) : null),
+          h('span', { class: 'fila__usos' }, p.usos + ' registro' + (p.usos === 1 ? '' : 's')),
+          esAdmin() && p.activo !== 'NO' ? h('button', { class: 'icono-btn', title: 'Unir con otra ficha (duplicado)', 'aria-label': 'Unir', onclick: function () { unir(p); } }, icono('unir')) : null,
+          esAdmin() ? h('button', { class: 'icono-btn', title: 'Editar', 'aria-label': 'Editar', onclick: function () { modalPersona({}, p).then(function (x) { if (x) cargar(); }); } }, icono('editar')) : null));
+      });
+    }
+    function unir(p) {
+      var destino = null;
+      var cb = comboPersona('Es la misma persona que…', { id: '', texto: '' }, { alCambiar: function (s) { destino = s.id ? s : null; } });
+      var v = ventana({ titulo: 'Unir fichas duplicadas', ancho: 560,
+        cuerpo: [h('div', { class: 'alerta alerta--info' }, 'Los registros de «' + p.nombre + '» pasarán a la ficha que elijas, y esta ficha se desactiva. Úsalo cuando la misma persona está capturada dos veces (con otra ortografía, por ejemplo).'),
+          cb.el],
+        pie: [h('button', { class: 'btn', onclick: function () { v.cerrar(); } }, 'Cancelar'),
+          h('button', { class: 'btn btn--prim', onclick: function () {
+            if (!destino || destino.id === p.id) { aviso('Elige otra ficha del directorio.', 'error'); return; }
+            var nombreDestino = lineas(destino.texto).primera;
+            confirmar('¿Unir «' + p.nombre + '» con «' + nombreDestino + '»?\nNo se puede deshacer desde la app.', { si: 'Unir' }).then(function (s) {
+              if (!s) return;
+              llamar('unirPersonas', { de: p.id, a: destino.id }).then(function (r) {
+                v.cerrar(); aviso('Listo: ' + r.actualizados + ' registros ahora apuntan a «' + nombreDestino + '».', 'ok');
+                E.directorio = E.directorio.filter(function (x) { return x.id !== p.id; });
+                cargar();
+              }).catch(fallo);
+            });
+          } }, 'Unir')] });
+      cb.montarEstado();
+    }
+    function cargar() { llamar('directorio').then(function (d) { datos = d; pintar(); }).catch(fallo); }
+    q.addEventListener('input', pintar);
+    cargar();
+  };
+
+  /* ───────────────────────── Usuarios ───────────────────────── */
+  vistas.usuarios = function () {
+    var cont = h('div', { class: 'tarjeta' }, h('div', { class: 'vacio' }, 'Cargando…'));
+    marco('usuarios').appendChild(h('div', null,
+      h('div', { class: 'titulo-vista' }, h('h1', null, 'Usuarios'), h('span', { class: 'sub' }, 'Quién entra y qué puede hacer'), h('div', { class: 'titulo-vista__esp' }),
+        h('button', { class: 'btn btn--prim', onclick: function () { modalUsuario(null); } }, icono('mas'), 'Nuevo usuario')), cont));
+    function libretasTxt(tipos) {
+      if (tipos === '*') return [h('span', { class: 'etq' }, 'Todas las libretas')];
+      return String(tipos || '').split(',').filter(Boolean).map(function (t) { return h('span', { class: 'etq' }, E.ini.todosTipos[t] ? E.ini.todosTipos[t].nombre : t); });
+    }
+    function cargar() {
+      llamar('usuarios').then(function (us) {
+        vaciar(cont).appendChild(h('div', { class: 'tabla-env', style: { display: 'block' } }, h('table', { class: 'tabla' },
+          h('thead', null, h('tr', null, ['Usuario', 'Nombre', 'Rol', 'Libretas', 'Estado', 'Último acceso', ''].map(function (x) { return h('th', null, x); }))),
+          h('tbody', null, us.map(function (u) {
+            return h('tr', { style: { cursor: 'default' } },
+              h('td', null, h('strong', null, u.usuario)), h('td', null, u.nombre), h('td', null, E.ini.roles[u.rol] || u.rol),
+              h('td', null, libretasTxt(u.tipos), u.informes === 'SI' && u.rol !== 'admin' ? h('span', { class: 'etq etq--inf' }, 'Informes') : null),
+              h('td', null, u.activo === 'SI' ? h('span', { class: 'etq' }, 'Activo') : h('span', { class: 'etq etq--gris' }, 'Inactivo'),
+                u.bloqueado ? h('span', { class: 'etq etq--rojo' }, 'Bloqueado') : null, u.debe_cambiar === 'SI' ? h('span', { class: 'etq etq--gris' }, 'Contraseña temporal') : null,
+                u.dosPasos ? h('span', { class: 'etq etq--verde' }, 'Dos pasos') : null, u.correo ? h('span', { class: 'etq etq--gris', title: u.correo }, 'Con correo') : null),
+              h('td', { class: 't-fecha' }, u.ultimo_acceso ? fechaCorta(u.ultimo_acceso) + ' ' + String(u.ultimo_acceso).slice(11, 16) : 'Nunca'),
+              h('td', { style: { whiteSpace: 'nowrap' } },
+                h('button', { class: 'btn btn--chico', onclick: function () { modalUsuario(u); } }, 'Editar'), ' ',
+                h('button', { class: 'btn btn--chico btn--fantasma', onclick: function () { restablecer(u); } }, 'Nueva contraseña')));
+          })))));
+      }).catch(function (e) { fallo(e); vaciar(cont).appendChild(h('div', { class: 'vacio' }, e.message)); });
+    }
+    function credenciales(usuario, temporal, titulo) {
+      var v = ventana({ titulo: titulo, ancho: 480, sinFoco: true, cuerpo: [
+        h('div', { class: 'cred' }, h('div', null, 'Usuario: ', h('code', null, usuario)), h('div', null, 'Contraseña temporal: ', h('code', null, temporal))),
+        h('div', { class: 'alerta alerta--aviso' }, 'Entrégala en persona o por un medio seguro. Al entrar se le pedirá cambiarla. No se vuelve a mostrar.')],
+        pie: [h('button', { class: 'btn', onclick: function () {
+          var t = 'Usuario: ' + usuario + '\nContraseña temporal: ' + temporal;
+          (navigator.clipboard ? navigator.clipboard.writeText(t) : Promise.reject()).then(function () { aviso('Copiado.', 'ok'); }, function () { aviso('Cópialo a mano.'); });
+        } }, icono('copiar'), 'Copiar'), h('button', { class: 'btn btn--prim', onclick: function () { v.cerrar(); } }, 'Listo')] });
+    }
+    function restablecer(u) {
+      confirmar('¿Crear una contraseña temporal nueva para ' + u.usuario + '?\nSe cerrarán sus sesiones abiertas.', { si: 'Crear contraseña' }).then(function (s) {
+        if (s) llamar('restablecerClave', { usuario: u.usuario }).then(function (r) { credenciales(r.usuario, r.temporal, 'Nueva contraseña temporal'); cargar(); }).catch(fallo);
+      });
+    }
+    function modalUsuario(u) {
+      var nuevo = !u;
+      var usuario = h('input', { class: 'entrada', value: u ? u.usuario : '', readOnly: !nuevo, maxlength: 30, autocapitalize: 'none', spellcheck: 'false', placeholder: 'p. ej. valentina.j' });
+      var nombre = h('input', { class: 'entrada', value: u ? u.nombre : '', maxlength: 120 });
+      var rol = h('select', { class: 'entrada' }, Object.keys(E.ini.roles).map(function (k) { return h('option', { value: k, selected: u ? u.rol === k : k === 'captura' }, E.ini.roles[k]); }));
+      var descRol = h('div', { class: 'campo__ayuda' });
+      var actuales = u ? (u.tipos === '*' ? Object.keys(E.ini.todosTipos) : String(u.tipos).split(',')) : Object.keys(E.ini.todosTipos);
+      var cajas = Object.keys(E.ini.todosTipos).map(function (t) { return { t: t, el: h('input', { type: 'checkbox', checked: actuales.indexOf(t) >= 0 }) }; });
+      var bloqueLib = h('fieldset', { class: 'grupo' }, h('legend', null, 'Libretas que puede ver'),
+        h('div', { class: 'rejilla' }, cajas.map(function (c) { return h('label', { class: 'casilla' }, c.el, E.ini.todosTipos[c.t].nombre); })));
+      var activo = h('input', { type: 'checkbox', checked: !u || u.activo === 'SI' });
+      // Informes: solo si el servidor ya lo sabe manejar (si no, no se manda y se conserva)
+      // (a un administrador no se le marca: si lo bajan de rol, no se queda con Informes sin que alguien lo elija)
+      var informes = tiene('informes') ? h('input', { type: 'checkbox', checked: !!(u && u.rol !== 'admin' && u.informes === 'SI') }) : null;
+      var campoInformes = informes ? h('label', { class: 'casilla' }, informes, 'Puede ver Informes (gráficas y números de sus libretas)') : null;
+      var desbloquear = u && u.bloqueado ? h('input', { type: 'checkbox', checked: true }) : null;
+      var correo = tiene('miCuenta') ? h('input', { class: 'entrada', type: 'email', value: u ? u.correo || '' : '', maxlength: 120, placeholder: 'nombre@dominio.mx' }) : null;
+      var quitar2fa = u && u.dosPasos ? h('input', { type: 'checkbox' }) : null;
+      var msg = h('div');
+      function pintarRol() {
+        descRol.textContent = { admin: 'Todo: registros de todas las libretas, cancelar, usuarios, bitácora, exportación y configuración.',
+          captura: 'Registra y edita en sus libretas, sube archivos y agrega personas al directorio.',
+          consulta: 'Solo ve, busca y abre archivos de sus libretas.' }[rol.value] + (rol.value === 'admin' && informes ? ' Los administradores siempre ven Informes.' : '');
+        bloqueLib.classList.toggle('oculto', rol.value === 'admin');
+        if (campoInformes) campoInformes.classList.toggle('oculto', rol.value === 'admin');
+      }
+      rol.addEventListener('change', pintarRol); pintarRol();
+      var v = ventana({ titulo: nuevo ? 'Nuevo usuario' : 'Editar ' + u.usuario, ancho: 620, cuidar: true, cuerpo: [msg,
+        h('div', { class: 'rejilla' }, campo('Usuario', usuario, { req: true, ayuda: nuevo ? 'Minúsculas, sin espacios ni acentos. No se puede cambiar después.' : null }), campo('Nombre completo', nombre, { req: true }),
+          h('div', { class: 'campo ancho' }, campo('Rol', rol), descRol),
+          correo ? h('div', { class: 'ancho' }, campo('Correo para avisos (opcional)', correo, { ayuda: 'Le llegan los avisos de turno y el resumen diario, si están prendidos en Configuración.' })) : null),
+        bloqueLib,
+        campoInformes,
+        nuevo ? null : h('label', { class: 'casilla' }, activo, 'Cuenta activa'),
+        desbloquear ? h('label', { class: 'casilla' }, desbloquear, 'Desbloquear (tiene intentos fallidos)') : null,
+        quitar2fa ? h('label', { class: 'casilla' }, quitar2fa, 'Quitar su verificación en dos pasos (perdió o cambió su teléfono)') : null,
+        nuevo ? h('div', { class: 'campo__ayuda' }, 'Se generará una contraseña temporal que tendrá que cambiar al entrar.') : h('div', { class: 'campo__ayuda' }, 'Si cambias rol, libretas o estado, tendrá que volver a entrar.')],
+        pie: [h('button', { class: 'btn', onclick: function () { v.cerrar(); } }, 'Cancelar'),
+          h('button', { class: 'btn btn--prim', onclick: function () {
+            var tipos = rol.value === 'admin' ? '*' : cajas.filter(function (c) { return c.el.checked; }).map(function (c) { return c.t; });
+            if (Array.isArray(tipos) && tipos.length === cajas.length) tipos = '*';
+            llamar('guardarUsuario', { nuevo: nuevo, usuario: usuario.value, nombre: nombre.value, rol: rol.value, tipos: tipos,
+              activo: activo.checked ? 'SI' : 'NO', desbloquear: desbloquear ? desbloquear.checked : false,
+              informes: informes ? informes.checked : undefined, correo: correo ? correo.value.trim() : undefined,
+              quitar2fa: quitar2fa ? quitar2fa.checked : false }).then(function (r) {
+              v.cerrar(); cargar(); cacheTurno = {};
+              if (r.temporal) credenciales(r.usuario, r.temporal, 'Usuario creado'); else aviso('Usuario actualizado.', 'ok');
+            }).catch(function (e) { vaciar(msg).appendChild(h('div', { class: 'alerta alerta--error' }, e.message)); });
+          } }, nuevo ? 'Crear usuario' : 'Guardar')] });
+    }
+    cargar();
+  };
+
+  /* ───────────────────────── Bitácora ───────────────────────── */
+  vistas.bitacora = function () {
+    var f = { desde: h('input', { class: 'entrada', type: 'date', 'aria-label': 'Desde' }), hasta: h('input', { class: 'entrada', type: 'date', 'aria-label': 'Hasta' }),
+      usuario: h('select', { class: 'entrada', 'aria-label': 'Usuario' }, h('option', { value: '' }, 'Todos los usuarios')),
+      accion: h('select', { class: 'entrada', 'aria-label': 'Acción' }, h('option', { value: '' }, 'Todas las acciones')),
+      texto: h('input', { class: 'entrada', type: 'search', placeholder: 'Buscar en el detalle…', 'aria-label': 'Buscar en el detalle' }) };
+    var cont = h('div', { class: 'tarjeta' }, h('div', { class: 'vacio' }, 'Cargando…'));
+    var conteo = h('p', { class: 'conteo' });
+    var primera = true, espera = null;
+    marco('bitacora').appendChild(h('div', null, h('div', { class: 'titulo-vista' }, h('h1', null, 'Bitácora'), h('span', { class: 'sub' }, 'Todo lo que se hace en el sistema queda aquí y no se puede borrar desde la app')),
+      h('div', { class: 'herr' }, f.desde, f.hasta, f.usuario, f.accion, h('div', { class: 'buscador' }, icono('buscar'), f.texto)), conteo, cont));
+    function cargar() {
+      llamar('bitacora', { desde: f.desde.value, hasta: f.hasta.value, usuario: f.usuario.value, accion: f.accion.value, texto: f.texto.value }).then(function (r) {
+        if (primera) {
+          r.usuarios.forEach(function (u) { f.usuario.appendChild(h('option', { value: u }, u)); });
+          r.acciones.forEach(function (a) { f.accion.appendChild(h('option', { value: a }, a)); });
+          primera = false;
+        }
+        conteo.textContent = (r.total > r.filas.length ? 'Mostrando los ' + r.filas.length + ' más recientes de ' + r.total : r.total + ' movimientos') +
+          (r.parcial ? ' (de los últimos ' + Number(r.revisados).toLocaleString('es-MX') + ' revisados; para ir más atrás elige la fecha «desde»)' : '');
+        vaciar(cont).appendChild(r.filas.length ? h('div', { class: 'tabla-env', style: { display: 'block' } }, h('table', { class: 'tabla bit' },
+          h('thead', null, h('tr', null, ['Fecha', 'Usuario', 'Acción', 'Detalle'].map(function (x) { return h('th', null, x); }))),
+          h('tbody', null, r.filas.map(function (x) {
+            return h('tr', { style: { cursor: x.registro_id && /^(r|m-)/.test(x.registro_id) ? 'pointer' : 'default' }, onclick: function () { if (x.registro_id && /^(r|m-)/.test(x.registro_id)) abrirDetalle(x.registro_id); } },
+              h('td', null, fechaCorta(x.fecha) + ' ' + String(x.fecha).slice(11, 16)), h('td', null, x.usuario), h('td', null, x.accion), h('td', null, x.detalle));
+          })))) : h('div', { class: 'vacio' }, 'Sin movimientos con esos filtros.'));
+      }).catch(fallo);
+    }
+    [f.desde, f.hasta, f.usuario, f.accion].forEach(function (x) { x.addEventListener('change', cargar); });
+    f.texto.addEventListener('input', function () { clearTimeout(espera); espera = setTimeout(cargar, 400); });
+    cargar();
+  };
+
+  /* ───────────────────────── Configuración ───────────────────────── */
+  /** Días festivos de ley (LFT, art. 74) y jueves y viernes santo de un año. Es una propuesta: se revisa con el calendario oficial. */
+  function festivosDe(anio) {
+    var dos = function (n) { return ('0' + n).slice(-2); };
+    var f = function (m, d) { return anio + '-' + dos(m) + '-' + dos(d); };
+    var nLunes = function (mes, n) {   // el n-ésimo lunes del mes
+      var d = new Date(anio, mes - 1, 1), primero = (8 - d.getDay()) % 7 + 1;
+      return f(mes, primero + (n - 1) * 7);
+    };
+    // Domingo de Pascua (algoritmo de Meeus/Jones/Butcher)
+    var a = anio % 19, b = Math.floor(anio / 100), c = anio % 100, d = Math.floor(b / 4), e = b % 4, g = Math.floor((8 * b + 13) / 25);
+    var hh = (19 * a + b - d - g + 15) % 30, i = Math.floor(c / 4), k = c % 4, l = (32 + 2 * e + 2 * i - hh - k) % 7, m = Math.floor((a + 11 * hh + 19 * l) / 433);
+    var mes = Math.floor((hh + l - 7 * m + 90) / 25), dia = (hh + l - 7 * m + 33 * mes + 19) % 32;
+    var pascua = new Date(anio, mes - 1, dia);
+    var menos = function (n) { var x = new Date(pascua); x.setDate(x.getDate() - n); return f(x.getMonth() + 1, x.getDate()); };
+    var lista = [[f(1, 1), 'Año Nuevo'], [nLunes(2, 1), 'Día de la Constitución'], [nLunes(3, 3), 'Natalicio de Benito Juárez'],
+      [menos(3), 'Jueves Santo'], [menos(2), 'Viernes Santo'], [f(5, 1), 'Día del Trabajo'], [f(9, 16), 'Día de la Independencia'],
+      [nLunes(11, 3), 'Día de la Revolución'], [f(12, 25), 'Navidad']];
+    if ((anio - 2024) % 6 === 0) lista.push([f(10, 1), 'Transmisión del Poder Ejecutivo Federal']);
+    return lista.sort(function (x, y) { return x[0] < y[0] ? -1 : 1; });
+  }
+
+  vistas.config = function () {
+    var c = E.ini.config, enc = c.encabezados || [];
+    var e1 = h('input', { class: 'entrada', value: enc[0] || '', maxlength: 200 });
+    var e2 = h('input', { class: 'entrada', value: enc[1] || '', maxlength: 200 });
+    var e3 = h('input', { class: 'entrada', value: enc[2] || '', maxlength: 200 });
+    var pl = h('input', { class: 'entrada', value: c.plantilla_OFS || '', maxlength: 200 });
+    var ej = h('div', { class: 'campo__ayuda' });
+    var plazo = h('input', { class: 'entrada', type: 'number', min: 0, max: 365, value: c.plazo_dias || '', style: { maxWidth: '160px' } });
+    var web = h('input', { class: 'entrada', type: 'url', value: c.url_web || '', maxlength: 200, placeholder: 'https://control-gestion.vercel.app' });
+    function pintarEj() { ej.textContent = pl.value ? 'Ejemplo: ' + pl.value.replace('{NNN}', '417').replace('{AAAA}', E.ini.anioActual) : 'Sin plantilla: los oficios salientes solo tendrán consecutivo.'; }
+    pl.addEventListener('input', pintarEj); pintarEj();
+    var nuevo = tiene('guardarLote');   // el servidor ya es 1.7.0 (sabe guardar lo nuevo)
+    // Días inhábiles
+    var inh = h('textarea', { class: 'entrada', id: 'cfg-inhabiles', rows: 4, placeholder: 'Una fecha por renglón: 2026-12-25', value: (c.dias_inhabiles || []).join('\n') });
+    var cuentaInh = h('span', { class: 'campo__ayuda' });
+    var contarInh = function () { var n = (inh.value.match(/\d{4}-\d{2}-\d{2}/g) || []).length; cuentaInh.textContent = n ? n + (n === 1 ? ' día' : ' días') : 'Ninguno: solo se descuentan sábados y domingos.'; };
+    inh.addEventListener('input', contarInh); contarInh();
+    var agregarFestivos = function (anio) {
+      var ya = inh.value.match(/\d{4}-\d{2}-\d{2}/g) || [];
+      var nuevos = festivosDe(anio).filter(function (x) { return ya.indexOf(x[0]) < 0; });
+      inh.value = (inh.value.trim() ? inh.value.trim() + '\n' : '') + nuevos.map(function (x) { return x[0] + '  ' + x[1]; }).join('\n');
+      contarInh();
+      aviso(nuevos.length ? 'Se agregaron ' + nuevos.length + ' días de ' + anio + '. Revisa y guarda.' : 'Ya estaban los de ' + anio + '.');
+    };
+    var acuseDesde = h('input', { class: 'entrada', type: 'date', value: c.acuse_desde || '', min: '2000-01-01', max: '2100-12-31', style: { maxWidth: '200px' } });
+    var plantillaDoc = h('input', { class: 'entrada', value: c.plantilla_doc_OFS ? 'https://docs.google.com/document/d/' + c.plantilla_doc_OFS + '/edit' : '', maxlength: 200, placeholder: 'https://docs.google.com/document/d/…/edit' });
+    var avisosCorreo = h('input', { type: 'checkbox', checked: c.avisos_correo === 'SI' });
+    var avisosDetalle = h('input', { type: 'checkbox', checked: c.avisos_detalle === 'SI' });
+    var dosPasos = h('input', { type: 'checkbox', checked: c.dos_pasos_admin === 'SI' });
+    var guardar = function (boton) {
+      var d = { encabezado_1: e1.value, encabezado_2: e2.value, encabezado_3: e3.value, plantilla_OFS: pl.value, plazo_dias: plazo.value === '0' ? '' : plazo.value, url_web: web.value.trim() };
+      if (nuevo) {
+        d.dias_inhabiles = inh.value; d.acuse_desde = acuseDesde.value; d.plantilla_doc_OFS = plantillaDoc.value.trim();
+        d.avisos_correo = avisosCorreo.checked ? 'SI' : 'NO'; d.avisos_detalle = avisosDetalle.checked ? 'SI' : 'NO'; d.dos_pasos_admin = dosPasos.checked ? 'SI' : 'NO';
+      }
+      if (boton) boton.disabled = true;
+      llamar('guardarConfig', d).then(function (cfg) {
+        // 1.7.0 regresa la configuración que usa la página; un servidor anterior, la pestaña completa
+        E.ini.config = cfg.encabezados ? cfg : { encabezados: [cfg.encabezado_1, cfg.encabezado_2, cfg.encabezado_3].filter(Boolean), plantilla_OFS: cfg.plantilla_OFS, plazo_dias: cfg.plazo_dias, url_web: cfg.url_web || '' };
+        if (nuevo) { inh.value = (E.ini.config.dias_inhabiles || []).join('\n'); contarInh(); }
+        E.iniT = 0;
+        aviso('Configuración guardada.', 'ok');
+      }).catch(fallo).then(function () { if (boton) boton.disabled = false; });
+    };
+    var anio = E.ini.anioActual;
+    marco('config').appendChild(h('div', null, h('div', { class: 'titulo-vista' }, h('h1', null, 'Configuración')),
+      h('div', { class: 'tarjeta config' },
+        h('h2', { class: 'config__t' }, icono('engrane'), 'General'),
+        campo('Encabezado · línea 1', e1), campo('Encabezado · línea 2', e2), campo('Encabezado · línea 3', e3, { ayuda: 'Salen en la pantalla de entrada y arriba de cada Excel.' }),
+        h('div', null, campo('Número oficial de los oficios salientes', pl, { ayuda: '{NNN} es el consecutivo (001, 002…) y {AAAA} el año.' }), ej),
+        campo('Plazo de respuesta por omisión (días hábiles)', plazo, { ayuda: 'Para entrantes: propone la fecha límite a partir de la fecha de recibido. Sin plazo no hay fecha límite y los avisos de «vencido» no funcionan.' }),
+        campo('Dirección pública de la app', web, { ayuda: 'Si la publicaste en Vercel, ponla aquí: la dirección de Google (/exec) solo mostrará un enlace a ella. Vacío = se usa la de Google.' }),
+        nuevo ? h('div', { class: 'campo' }, h('label', { class: 'campo__et', for: 'cfg-inhabiles' }, 'Días inhábiles'),
+          inh, h('div', { class: 'config__fila' }, cuentaInh,
+            h('button', { type: 'button', class: 'btn btn--chico', onclick: function () { agregarFestivos(anio); } }, 'Agregar los de ley de ' + anio),
+            h('button', { type: 'button', class: 'btn btn--chico', onclick: function () { agregarFestivos(anio + 1); } }, 'De ' + (anio + 1))),
+          h('div', { class: 'campo__ayuda' }, 'No cuentan para la fecha límite ni para el tiempo de respuesta. Los botones agregan los festivos de ley y jueves y viernes santo, con su nombre para que los revises (al guardar quedan solo las fechas). Revisa el acuerdo de días inhábiles de la Gaceta Oficial de la CDMX y agrega o quita lo que haga falta, una fecha por renglón.')) : null,
+        nuevo ? campo('«Sin acuse» cuenta desde', acuseDesde, { ayuda: 'Para que el aviso de «sin acuse» no incluya lo de antes del sistema (lo migrado del Excel). Vacío = todos.' }) : null,
+        h('div', null, h('button', { class: 'btn btn--prim', onclick: function () { guardar(this); } }, 'Guardar'))),
+      nuevo ? h('div', { class: 'tarjeta config', style: { marginTop: '16px' } },
+        h('h2', { class: 'config__t' }, icono('archivo'), 'Borrador del oficio en Word'),
+        h('p', { class: 'config__d' }, 'Un documento de Google Docs con el formato del oficio. Donde quieras cada dato escribe: {{NUMERO}}, {{FECHA_LARGA}} (21 de octubre de 2026), {{FECHA}}, {{DESTINATARIO}}, {{CARGO_DESTINATARIO}}, {{ASUNTO}}, {{FIRMA}}, {{CARGO_FIRMA}}, {{ELABORO}}, {{CARPETA}}, {{OBSERVACIONES}}, {{CONSECUTIVO}} o {{ANIO}}.'),
+        h('p', { class: 'config__d' }, 'Por seguridad, el documento tiene que estar en la carpeta «Control de Gestión · Plantillas (NO COMPARTIR)» del Drive de la cuenta dueña. Después aparece el botón «Borrador en Word» en cada oficio saliente.'),
+        campo('Enlace del documento plantilla', plantillaDoc, { ayuda: 'Vacío = sin borrador en Word.' }),
+        h('div', null, h('button', { class: 'btn btn--prim', onclick: function () { guardar(this); } }, 'Guardar'))) : null,
+      nuevo ? h('div', { class: 'tarjeta config', style: { marginTop: '16px' } },
+        h('h2', { class: 'config__t' }, icono('enviar'), 'Avisos por correo'),
+        h('label', { class: 'casilla' }, avisosCorreo, 'Mandar correos al turnar un asunto y un resumen a las 8 am de lo vencido y por vencer'),
+        h('label', { class: 'casilla' }, avisosDetalle, 'Incluir el asunto en los correos'),
+        h('p', { class: 'config__d' }, 'Llegan a quien tenga correo en Usuarios (o lo ponga en «Mi cuenta»). Sin el asunto, el correo solo dice el número, la libreta y la fecha límite: es lo más seguro si los correos van a cuentas personales. Salen de la cuenta dueña (unos 100 al día en una cuenta gratuita).'),
+        h('div', null, h('button', { class: 'btn btn--prim', onclick: function () { guardar(this); } }, 'Guardar'))) : null,
+      nuevo ? h('div', { class: 'tarjeta config', style: { marginTop: '16px' } },
+        h('h2', { class: 'config__t' }, icono('llave'), 'Verificación en dos pasos'),
+        h('label', { class: 'casilla' }, dosPasos, 'Obligatoria para administradores'),
+        h('p', { class: 'config__d' }, 'Con esto, un administrador que no la tenga solo puede activarla antes de seguir. Primero actívala tú en «Mi cuenta». Si alguien pierde su teléfono, en Usuarios → Editar se le quita.'),
+        h('div', null, h('button', { class: 'btn btn--prim', onclick: function () { guardar(this); } }, 'Guardar'))) : null,
+      tiene('mantenimiento') ? tarjetaMantenimiento() : null,
+      tiene('respaldo') ? h('div', { class: 'tarjeta config', style: { marginTop: '16px' } },
+        h('h2', { class: 'config__t' }, icono('respaldo'), 'Respaldo completo'),
+        h('p', { class: 'config__d' }, 'Un Excel con una hoja por pestaña de la base: Registros, Directorio, Usuarios (sin contraseñas ni secretos), Bitácora y Configuración. Queda anotado en la Bitácora.'),
+        h('p', { class: 'config__d' }, 'Guárdalo en un lugar seguro: trae datos personales. Además, cada día se hace una copia de la hoja en «Respaldos» (las 14 más recientes y una por semana de las 12 anteriores) y los escaneos nuevos se copian a «Respaldos/Archivos (espejo)».'),
+        h('div', null, h('button', { class: 'btn btn--prim', onclick: function () { descargarRespaldo(this); } }, icono('bajar'), 'Descargar respaldo completo'))) : null,
+      h('div', { class: 'tarjeta config', style: { marginTop: '16px' } }, h('h2', { style: { fontSize: '16px' } }, 'Seguridad'),
+        h('ul', { style: { margin: 0, paddingLeft: '18px', display: 'grid', gap: '6px', color: 'var(--texto-2)' } },
+          h('li', null, 'La hoja de cálculo y las carpetas de Drive del sistema no deben compartirse con nadie: todos entran por esta app.'),
+          h('li', null, 'Para revisarlo, el dueño de la hoja corre revisarSeguridad() desde Extensiones → Apps Script; revisarRespaldos() abre la copia más reciente y revisa que esté completa.'),
+          h('li', null, 'Para una copia fuera de la cuenta dueña, el dueño pone en la pestaña Config («respaldo_externo») una carpeta de otra cuenta o de una unidad compartida (ver INSTALAR.md).'),
+          h('li', null, 'Cuando alguien deja el área: Usuarios → Editar → desmarca «Cuenta activa». Su historial se conserva.')))));
+  };
+
+  /* ───────────────────────── Mi cuenta ───────────────────────── */
+  function modalMiCuenta() {
+    var yo = E.ini.yo;
+    var correo = h('input', { class: 'entrada', type: 'email', value: yo.correo || '', maxlength: 120, autocomplete: 'email', placeholder: 'nombre@dominio.mx' });
+    var equipo = leerEquipo(yo.usuario);
+    var secciones = [
+      h('section', { class: 'cuenta__s' }, h('h3', null, 'Contraseña'),
+        h('p', null, 'Cámbiala cuando quieras; se cierran tus demás sesiones.'),
+        h('button', { class: 'btn', onclick: function () { pantallaCambiarClave(false); } }, icono('llave'), 'Cambiar mi contraseña'))
+    ];
+    if (tiene('totpIniciar')) {
+      var estado2 = h('div');
+      var pintar2 = function () {
+        vaciar(estado2).appendChild(E.ini.yo.dosPasos
+          ? h('div', null, h('p', null, h('span', { class: 'ins ins--Atendido' }, '✓ Activada'), ' Al entrar se te pide un código de tu app de autenticación.'),
+            h('button', { class: 'btn btn--fantasma', onclick: function () { quitar2fa(); } }, 'Quitarla'))
+          : h('div', null, h('p', null, 'Además de la contraseña, al entrar te pedirá un código de 6 dígitos de tu celular. Así, aunque alguien sepa tu contraseña, no puede entrar.'),
+            h('button', { class: 'btn btn--prim', onclick: function () { v.cerrar(); pantallaActivar2fa(false); } }, 'Activar')));
+      };
+      var quitar2fa = function () {
+        var clave = campoClave('Tu contraseña'), cod = campoCodigo('Código de tu app'), m = h('div');
+        var q = ventana({ titulo: 'Quitar la verificación en dos pasos', ancho: 420, cuerpo: [h('p', { style: { margin: 0 } }, 'Para quitarla escribe tu contraseña y un código actual.'), clave.el, cod.el, m],
+          pie: [h('button', { class: 'btn', onclick: function () { q.cerrar(); } }, 'Cancelar'), h('button', { class: 'btn btn--peligro-lleno', onclick: function () {
+            llamar('totpQuitar', { clave: clave.input.value, codigo: cod.valor() }).then(function () {
+              E.ini.yo.dosPasos = false; q.cerrar(); pintar2(); aviso('Quitaste la verificación en dos pasos.', 'ok');
+            }).catch(function (e) { vaciar(m).appendChild(h('div', { class: 'alerta alerta--error' }, e.message)); });
+          } }, 'Quitar')] });
+      };
+      pintar2();
+      secciones.push(h('section', { class: 'cuenta__s' }, h('h3', null, 'Verificación en dos pasos'), estado2));
+    }
+    if (tiene('miCuenta')) {
+      secciones.push(h('section', { class: 'cuenta__s' }, h('h3', null, 'Correo para avisos'),
+        h('p', null, 'Si los avisos están prendidos, te llega un correo cuando te turnan un asunto y un resumen por la mañana. Déjalo vacío para no recibirlos.'),
+        h('div', { class: 'cuenta__fila' }, correo, h('button', { class: 'btn', onclick: function () {
+          var b = this; b.disabled = true;
+          llamar('miCuenta', { correo: correo.value }).then(function (r) { E.ini.yo.correo = r.correo; correo.value = r.correo; aviso(r.correo ? 'Correo guardado.' : 'Ya no recibirás avisos por correo.', 'ok'); })
+            .catch(fallo).then(function () { b.disabled = false; });
+        } }, 'Guardar'))));
+    }
+    secciones.push(h('section', { class: 'cuenta__s' }, h('h3', null, 'Este equipo'),
+      equipo ? h('p', null, 'Este equipo recuerda tu usuario y es «de confianza»: si alguien provoca bloqueos de tu cuenta, desde aquí sí podrás entrar (la contraseña se pide igual).')
+        : h('p', null, 'Este equipo no recuerda tu usuario. Si es tuyo, al entrar marca «Recordar mi usuario en este equipo».'),
+      equipo ? h('button', { class: 'btn btn--fantasma', onclick: function () { guardarEquipo('', ''); recordarUsuario(''); aviso('Este equipo ya no recuerda tu usuario.', 'ok'); v.cerrar(); } }, 'Olvidar este equipo') : null));
+    var v = ventana({ titulo: 'Mi cuenta · ' + yo.nombre, ancho: 520, sinFoco: true, cuerpo: h('div', { class: 'cuenta' }, secciones),
+      pie: [h('button', { class: 'btn btn--prim', onclick: function () { v.cerrar(); } }, 'Listo')] });
+  }
+
+  /** Modo mantenimiento: solo los administradores pueden usar el sistema mientras está prendido. */
+  function tarjetaMantenimiento() {
+    var m = E.ini.mantenimiento || { activo: false, mensaje: '' };
+    var cont = h('div', { class: 'tarjeta config', style: { marginTop: '16px' } });
+    function pintar() {
+      var activo = !!m.activo;
+      var texto = h('textarea', { class: 'entrada', rows: 2, maxlength: 300, placeholder: 'Ej.: Estamos actualizando el sistema. Regresa a las 3 de la tarde.',
+        value: activo ? m.mensaje : '' });
+      var cuenta = h('span', { class: 'campo__ayuda' });
+      var contar = function () { cuenta.textContent = texto.value.length + ' de 300'; };
+      texto.addEventListener('input', contar); contar();
+      function guardar(prender) {
+        var msg = texto.value.trim();
+        if (prender && msg.length < 5) { aviso('Escribe el mensaje que verá la gente.', 'error'); texto.focus(); return; }
+        var seguir = prender && !activo ? confirmar('Mientras esté prendido, las personas que no son administradoras verán este mensaje y saldrán del sistema (en unos minutos, o en cuanto hagan algo). No podrán entrar hasta que lo apagues.\n\n¿Prender el modo mantenimiento?', { si: 'Prender', titulo: 'Modo mantenimiento' }) : Promise.resolve(true);
+        seguir.then(function (ok) {
+          if (!ok) return;
+          llamar('mantenimiento', { activo: prender, mensaje: msg }).then(function (r) {
+            m = r; E.ini.mantenimiento = r;
+            aviso(r.activo ? 'Modo mantenimiento prendido.' : 'Modo mantenimiento apagado: todos pueden entrar.', 'ok');
+            pintar();
+          }).catch(fallo);
+        });
+      }
+      vaciar(cont).appendChild(h('div', { class: 'mant' },
+        h('div', { class: 'mant__cab' }, h('h2', { class: 'config__t' }, icono('herramienta'), 'Modo mantenimiento'),
+          h('span', { class: 'mant__estado' + (activo ? ' mant__estado--on' : '') }, activo ? 'Prendido' : 'Apagado')),
+        h('p', { class: 'config__d' }, 'Úsalo cuando vayas a hacer cambios grandes. Mientras está prendido solo entran los administradores; los demás ven tu mensaje en la pantalla de entrada.'),
+        campo('Mensaje para la gente', texto, { ayuda: null }), cuenta,
+        h('div', { class: 'mant__botones' },
+          activo ? h('button', { class: 'btn btn--prim', onclick: function () { guardar(false); } }, 'Apagar mantenimiento') :
+            h('button', { class: 'btn btn--peligro-lleno', onclick: function () { guardar(true); } }, icono('herramienta'), 'Prender mantenimiento'),
+          activo ? h('button', { class: 'btn', onclick: function () { guardar(true); } }, 'Cambiar el mensaje') : null)));
+    }
+    pintar();
+    return cont;
+  }
+
+  /** Respaldo completo en Excel (se arma en el navegador con ExcelCG, sin librerías). */
+  function descargarRespaldo(boton) {
+    if (boton) { boton.disabled = true; }
+    llamar('respaldo').then(function (r) {
+      var NOMBRES = { Registros: 'Registros', Directorio: 'Directorio', Usuarios: 'Usuarios', Bitacora: 'Bitácora', Config: 'Configuración' };
+      var FECHAS = { fecha: 1, fecha_recepcion: 1, fecha_limite: 1 };
+      var NUMEROS = { anio: 1, consecutivo: 1, version: 1, intentos: 1 };
+      var ANCHOS_R = { asunto: 50, observaciones: 44, dirigido_a: 34, firma: 34, detalle: 70, nombre: 30, cargo: 30, dependencia: 26, valor: 40, descripcion: 50, origen: 30, area: 28, motivo_cancelacion: 30 };
+      var PIES = { Usuarios: 'Sin contraseñas ni sellos de sesión.', Registros: 'Sin los IDs internos de Drive: los escaneos están en la carpeta «Archivos» del Drive de la cuenta dueña.' };
+      var cuando = fechaCorta(r.generado) + ' ' + String(r.generado).slice(11, 16);
+      var hojas = Object.keys(r.hojas).map(function (k) {
+        var x = r.hojas[k];
+        return {
+          nombre: NOMBRES[k] || k,
+          titulos: (E.ini.config.encabezados || []).concat(['Control de Gestión · Respaldo completo · ' + (NOMBRES[k] || k),
+            x.filas.length + ' filas · generado el ' + cuando + ' por ' + E.ini.yo.nombre + ' · versión ' + r.version]),
+          encabezados: x.columnas,
+          anchos: x.columnas.map(function (c) { return ANCHOS_R[c] || 16; }),
+          tipos: x.columnas.map(function (c) { return FECHAS[c] ? 'fecha' : NUMEROS[c] ? 'numero' : 'texto'; }),
+          filas: x.filas,
+          pie: PIES[k] || 'Fuente: Control de Gestión.'
+        };
+      });
+      descargarBytes(ExcelCG.libro(hojas), 'Respaldo Control de Gestión ' + String(r.generado).slice(0, 10) + '.xlsx',
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    }).catch(fallo).then(function () { if (boton) boton.disabled = false; });
+  }
+</script>

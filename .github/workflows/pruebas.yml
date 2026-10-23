@@ -1,0 +1,32 @@
+# Corre las pruebas en cada push y en cada pull request.
+# Los datos reales (base/, capturas/) no están en GitHub: las pruebas que
+# los necesitan se saltan solas y el resto corre con datos de ejemplo.
+name: Pruebas
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  pruebas:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Lectores para las pruebas de Excel y del código QR
+        run: python -m pip install --quiet openpyxl opencv-python-headless
+      - name: Pruebas
+        run: npm test
+      - name: La página se arma
+        run: node herramientas/armar-web.mjs
+        env:
+          CG_API_URL: https://script.google.com/macros/s/AKfycbPRUEBA/exec

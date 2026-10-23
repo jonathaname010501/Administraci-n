@@ -21,7 +21,7 @@ function preparar({ conBase = true } = {}) {
   assert.ok(m, "instalar() debe mostrar el primer administrador:\n" + salida);
   e.comoAnonimo();
   const r1 = e.api(null, "entrar", { usuario: m[1], clave: m[2] });
-  const r2 = e.api(r1.datos.token, "cambiarClave", { actual: m[2], nueva: "Gestion2026" });
+  const r2 = e.api(r1.datos.token, "cambiarClave", { actual: m[2], nueva: "Jacaranda2026x" });
   assert.equal(r2.ok, true, JSON.stringify(r2));
   e.admin = r2.datos.token;
   e.salidaInstalar = salida;
@@ -33,12 +33,12 @@ function alta(e, usuario, rol, tipos, extra = {}) {
   const r = e.api(e.admin, "guardarUsuario", { nuevo: true, usuario, nombre: "Persona " + usuario, rol, tipos, ...extra });
   assert.equal(r.ok, true, JSON.stringify(r));
   const r1 = e.api(null, "entrar", { usuario, clave: r.datos.temporal });
-  const r2 = e.api(r1.datos.token, "cambiarClave", { actual: r.datos.temporal, nueva: "Minutario2026x" });
+  const r2 = e.api(r1.datos.token, "cambiarClave", { actual: r.datos.temporal, nueva: "Ahuehuete2026x" });
   assert.equal(r2.ok, true, JSON.stringify(r2));
   return r2.datos.token;
 }
 
-function entrar(e, usuario, clave = "Minutario2026x") {
+function entrar(e, usuario, clave = "Ahuehuete2026x") {
   const r = e.api(null, "entrar", { usuario, clave });
   assert.equal(r.ok, true, JSON.stringify(r));
   return r.datos.token;

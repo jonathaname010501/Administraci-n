@@ -1,0 +1,398 @@
+<script>
+  /* Control de Gestión · Entrar, contraseña, dos pasos y fin de sesión. Es una parte de la app: se junta con las demás App*.html (ver FRAGMENTOS_APP en Servidor.gs). */
+  /* ───────────────────────── Entrar ───────────────────────── */
+  function encabezadoInst() {
+    var enc = (E.ini && E.ini.config.encabezados) || (E.publico && E.publico.encabezados) || [];
+    return enc;
+  }
+
+  // Recordar SOLO el usuario (nunca la contraseña) en este equipo, si la persona lo pide.
+  function usuarioRecordado() { try { return localStorage.getItem('cg_usuario') || ''; } catch (e) { return ''; } }
+  function recordarUsuario(u) { try { if (u) localStorage.setItem('cg_usuario', u); else localStorage.removeItem('cg_usuario'); } catch (e) { /* sin almacenamiento */ } }
+  var esCelular = function () { return window.innerWidth < 768; };
+
+  /* «Equipo de confianza»: un comprobante firmado por el servidor que se guarda
+     junto con el usuario recordado. No abre la sesión (la contraseña se pide
+     igual); solo evita quedarse fuera si alguien más provoca bloqueos. */
+  function leerEquipo(u) {
+    try { var x = JSON.parse(localStorage.getItem('cg_equipo') || 'null'); return x && x.u === u ? String(x.t || '') : ''; } catch (e) { return ''; }
+  }
+  function guardarEquipo(u, t) {
+    try { if (u && t) localStorage.setItem('cg_equipo', JSON.stringify({ u: u, t: t })); else localStorage.removeItem('cg_equipo'); } catch (e) { /* sin almacenamiento */ }
+  }
+
+  /** Campo de contraseña con botón para verla y aviso de Bloq Mayús. */
+  function campoClave(etiqueta, o) {
+    o = o || {};
+    var input = h('input', { class: 'lcampo__input lcampo__input--ojo', type: 'password', autocomplete: o.autocomplete || 'current-password',
+      maxlength: 128, placeholder: o.placeholder || '••••••••', enterkeyhint: o.enter || 'go', value: o.valor || '' });
+    var ojo = h('button', { type: 'button', class: 'lcampo__ojo', 'aria-label': 'Ver contraseña', 'aria-pressed': 'false', onclick: function () {
+      var ver = input.type === 'password';
+      input.type = ver ? 'text' : 'password';
+      ojo.setAttribute('aria-pressed', ver ? 'true' : 'false');
+      ojo.setAttribute('aria-label', ver ? 'Ocultar contraseña' : 'Ver contraseña');
+      vaciar(ojo).appendChild(icono(ver ? 'ojoNo' : 'ojo'));
+      input.focus();
+    } }, icono('ojo'));
+    var mayus = h('span', { class: 'lcampo__mayus oculto' }, icono('alerta'), 'Bloq Mayús está activado');
+    var error = h('span', { class: 'lcampo__error oculto', role: 'alert' });
+    function revisarMayus(ev) { if (ev.getModifierState) mayus.classList.toggle('oculto', !ev.getModifierState('CapsLock')); }
+    input.addEventListener('keydown', revisarMayus);
+    input.addEventListener('keyup', revisarMayus);
+    input.addEventListener('blur', function () { mayus.classList.add('oculto'); });
+    input.addEventListener('input', function () { error.classList.add('oculto'); input.classList.remove('lcampo__input--mal'); });
+    var el = h('label', { class: 'lcampo' }, h('span', { class: 'lcampo__label' }, etiqueta),
+      h('span', { class: 'lcampo__caja' }, input, ojo), mayus, error);
+    return { el: el, input: input, falta: function (msg) { error.textContent = msg; error.classList.remove('oculto'); input.classList.add('lcampo__input--mal'); input.focus(); } };
+  }
+
+  /** Campo para el código de 6 dígitos de la app de autenticación. */
+  function campoCodigo(etiqueta) {
+    var input = h('input', { class: 'lcampo__input lcampo__input--codigo', type: 'text', inputmode: 'numeric', autocomplete: 'one-time-code', pattern: '[0-9]*',
+      maxlength: 7, placeholder: '123 456', enterkeyhint: 'go' });
+    var error = h('span', { class: 'lcampo__error oculto', role: 'alert' });
+    input.addEventListener('input', function () {
+      error.classList.add('oculto'); input.classList.remove('lcampo__input--mal');
+      input.value = input.value.replace(/[^\d ]/g, '');
+    });
+    var el = h('label', { class: 'lcampo' }, h('span', { class: 'lcampo__label' }, etiqueta || 'Código de verificación'), input, error);
+    return { el: el, input: input, valor: function () { return input.value.replace(/\D/g, ''); },
+      falta: function (msg) { error.textContent = msg; error.classList.remove('oculto'); input.classList.add('lcampo__input--mal'); input.focus(); } };
+  }
+
+  function lienzoEntrada(contenido) {
+    var enc = encabezadoInst();
+    vaciar(app).appendChild(h('main', { class: 'login' },
+      h('div', { class: 'login__card' }, contenido),
+      h('footer', { class: 'login__pie' },
+        enc[0] ? h('span', { class: 'login__pie-1' }, enc[0]) : null,
+        enc[1] ? h('span', { class: 'login__pie-2' }, enc[1]) : null)));
+  }
+
+  function encabezadoTarjeta(titulo, sub) {
+    return [h('p', { class: 'login__eyebrow' }, 'SAPCI · Ciudad de México'),
+      h('img', { class: 'login__logo', src: LOGO, alt: 'Territorios de Paz e Igualdad', width: 96, height: 96 }),
+      h('h1', { class: 'login__titulo' }, titulo), h('p', { class: 'login__sub' }, sub)];
+  }
+
+  /** Lo que sigue después de entrar (con o sin código de dos pasos). */
+  function trasEntrar(r, u, claveEscrita, recordar) {
+    recordarUsuario(recordar ? u : '');
+    guardarEquipo(recordar ? u : '', recordar ? (r.equipo || leerEquipo(u)) : '');
+    E.token = r.token; guardarLocal('cg_token', r.token);
+    E.usuarioEntrada = u;
+    E.nombreEntrada = r.nombre || '';
+    if (r.debe_cambiar) pantallaCambiarClave(true, claveEscrita, r.motivo);
+    else if (r.activar2fa) pantallaActivar2fa(true);
+    else if (r.inicio) aplicarInicio(r.inicio);   // entrar ya trae el portal: una vuelta menos
+    else cargarInicio();
+  }
+
+  function pantallaEntrar(mensaje) {
+    document.title = 'Control de Gestión';
+    var recordado = usuarioRecordado();
+    var usuario = h('input', { class: 'lcampo__input', type: 'text', autocomplete: 'username', autocapitalize: 'none', autocorrect: 'off',
+      spellcheck: 'false', maxlength: 30, placeholder: 'nombre.apellido', enterkeyhint: 'next', value: recordado });
+    var errUsuario = h('span', { class: 'lcampo__error oculto', role: 'alert' });
+    usuario.addEventListener('input', function () { errUsuario.classList.add('oculto'); usuario.classList.remove('lcampo__input--mal'); });
+    var clave = campoClave('Contraseña');
+    var recordar = h('input', { type: 'checkbox', checked: !!recordado });
+    var sinRed = h('p', { class: 'login__aviso' + (navigator.onLine === false ? '' : ' oculto'), role: 'status' }, icono('sinRed'), 'No hay internet. Conéctate para poder entrar.');
+    var avisoLuz = function () { sinRed.classList.toggle('oculto', navigator.onLine !== false); };
+    window.addEventListener('online', avisoLuz);
+    window.addEventListener('offline', avisoLuz);
+    var msg = h('div', { role: 'alert' }, mensaje ? h('p', { class: 'login__info' }, mensaje) : null);
+    var cajaMant = h('div', { role: 'status' });
+    function pintarMant() {
+      var mant = E.publico && E.publico.mantenimiento && E.publico.mantenimiento.activo ? E.publico.mantenimiento : null;
+      vaciar(cajaMant);
+      if (mant) cajaMant.appendChild(h('div', { class: 'login__mant' }, icono('herramienta'),
+        h('div', null, h('strong', null, 'Sistema en mantenimiento'), h('p', null, mant.mensaje), h('small', null, 'Por ahora solo pueden entrar los administradores.'))));
+    }
+    pintarMant();
+    // El aviso de mantenimiento se revisa de nuevo al mostrar esta pantalla (pudo cambiar)
+    if (!E.publicoEn || Date.now() - E.publicoEn > 10000) {
+      llamar('estado', null, { silencioso: true }).then(function (p) { E.publico = p; E.publicoEn = Date.now(); pintarMant(); }).catch(function () {});
+    }
+    var boton = h('button', { class: 'login__boton', type: 'submit' }, 'Entrar');
+    function ocupado(si, texto) {
+      boton.disabled = si;
+      vaciar(boton);
+      if (si) boton.appendChild(h('span', { class: 'login__spinner', 'aria-hidden': 'true' }));
+      boton.appendChild(document.createTextNode(si ? 'Entrando…' : (texto || 'Entrar')));
+    }
+    var listo = function () { window.removeEventListener('online', avisoLuz); window.removeEventListener('offline', avisoLuz); };
+    // Segundo paso: el código de la app de autenticación
+    function pasoCodigo(ticket, u, claveEscrita) {
+      var codigo = campoCodigo('Código de 6 dígitos');
+      var msg2 = h('div', { role: 'alert' });
+      var b2 = h('button', { class: 'login__boton', type: 'submit' }, 'Verificar');
+      var form2 = h('form', { class: 'login__form', novalidate: true, onsubmit: function (ev) {
+        ev.preventDefault();
+        vaciar(msg2);
+        if (codigo.valor().length !== 6) { codigo.falta('Escribe los 6 dígitos que muestra tu app.'); return; }
+        b2.disabled = true; b2.textContent = 'Verificando…';
+        llamar('entrarCodigo', { ticket: ticket, codigo: codigo.valor() }).then(function (r) {
+          listo();
+          trasEntrar(r, u, claveEscrita, recordar.checked);
+        }).catch(function (e) {
+          b2.disabled = false; b2.textContent = 'Verificar';
+          if (e.codigo === 'CODIGO_VENCIDO' || (e.extra && e.extra.reiniciar) || e.codigo === 'BLOQUEADO') { pantallaEntrar(e.message); return; }
+          codigo.input.value = '';
+          vaciar(msg2).appendChild(h('p', { class: 'login__error' }, e.message));
+          codigo.input.focus();
+        });
+      } }, h('p', { class: 'login__paso' }, icono('llave'), 'Abre tu app de autenticación (Google Authenticator, Microsoft Authenticator…) y escribe el código de «Control de Gestión».'),
+        codigo.el, msg2, b2,
+        h('button', { type: 'button', class: 'login__otro', onclick: function () { pantallaEntrar(); } }, 'Volver'));
+      lienzoEntrada([].concat(encabezadoTarjeta('Verificación en dos pasos', 'Tu contraseña es correcta. Falta un paso.'), [form2]));
+      codigo.input.focus();
+    }
+    var form = h('form', { class: 'login__form', novalidate: true, onsubmit: function (ev) {
+      ev.preventDefault();
+      vaciar(msg);
+      var u = usuario.value.trim().toLowerCase();
+      if (!u) { errUsuario.textContent = 'Escribe tu usuario.'; errUsuario.classList.remove('oculto'); usuario.classList.add('lcampo__input--mal'); usuario.focus(); return; }
+      if (!clave.input.value) { clave.falta('Escribe tu contraseña.'); return; }
+      ocupado(true);
+      var claveEscrita = clave.input.value;
+      llamar('entrar', { usuario: u, clave: claveEscrita, recordar: recordar.checked, equipo: leerEquipo(u) }).then(function (r) {
+        if (r.requiereCodigo) { pasoCodigo(r.ticket, u, claveEscrita); return; }
+        listo();
+        trasEntrar(r, u, claveEscrita, recordar.checked);
+      }).catch(function (e) {
+        ocupado(false);
+        if (e.codigo === 'MANTENIMIENTO') { pantallaEntrar(); return; }
+        vaciar(msg).appendChild(h('p', { class: 'login__error' }, e.message));
+        clave.input.value = '';
+        clave.input.focus();
+      });
+    } },
+      h('label', { class: 'lcampo' }, h('span', { class: 'lcampo__label' }, 'Usuario'), usuario, errUsuario),
+      clave.el,
+      h('label', { class: 'login__recordar' }, recordar, 'Recordar mi usuario en este equipo'),
+      msg, boton);
+    lienzoEntrada([].concat(encabezadoTarjeta('Control de Gestión', recordado ? 'Hola de nuevo. Escribe tu contraseña para continuar.' : 'Inicia sesión para continuar.'),
+      [cajaMant, sinRed, form, h('p', { class: 'login__ayuda' }, '¿Olvidaste tu contraseña? Pide a un administrador que te dé una nueva.')]));
+    // En celular no se abre el teclado de golpe: tapa la pantalla.
+    if (!esCelular()) (recordado ? clave.input : usuario).focus();
+  }
+
+  /* ─────────── Reglas de la contraseña ───────────
+     Las MISMAS listas que Seguridad.gs (el servidor es quien decide; aquí solo
+     se avisa mientras se escribe). La prueba revisa que coincidan. */
+  var MIN_CLAVE = 10;
+  var CLAVE_CONTIENE = ['contrasena', 'password', 'passw', 'gestion', 'minutario', 'oficio', 'secretari', 'subsecretari',
+    'administrador', 'usuario', 'bienvenid', 'territorio', 'gabinete', 'igualdad', 'ciudaddemexico', 'cdmx', 'sapci', 'stpi',
+    'mexico', 'control', 'qwert', 'asdfg', 'zxcvb', 'abcde'];
+  var CLAVE_EXACTAS = ['paz', 'hola', 'admin', 'amor', 'teamo', 'abc', 'pass', 'prueba', 'test', 'mama', 'papa', 'dios', 'familia',
+    'america', 'chivas', 'pumas', 'cruzazul', 'tigres', 'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto',
+    'septiembre', 'octubre', 'noviembre', 'diciembre', 'lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado', 'domingo',
+    'primavera', 'verano', 'otono', 'invierno', 'clave', 'acceso', 'sistema'];
+  function sinAcentos(s) { return String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase(); }
+  function claveObvia(n) {
+    var letras = n.replace(/[^a-zñ]/g, '');
+    if (!letras) return true;
+    if (/^(.)\1*$/.test(letras)) return true;
+    if (letras.length >= 3 && ('abcdefghijklmnopqrstuvwxyz'.indexOf(letras) >= 0 || 'zyxwvutsrqponmlkjihgfedcba'.indexOf(letras) >= 0)) return true;
+    if (CLAVE_EXACTAS.indexOf(letras) >= 0) return true;
+    return CLAVE_CONTIENE.some(function (w) { return letras.indexOf(w) >= 0; });
+  }
+  function reglasClave(valor, usuario, nombre) {
+    var n = sinAcentos(valor), us = sinAcentos(usuario);
+    var partesUs = us.split(/[^a-z0-9ñ]+/).filter(function (x) { return x.length >= 4; });
+    var partesNom = sinAcentos(nombre).split(/[^a-zñ]+/).filter(function (x) { return x.length >= 4; });
+    var conUsuario = (us && n.indexOf(us) >= 0) || partesUs.some(function (x) { return n.indexOf(x) >= 0; });
+    var conNombre = partesNom.some(function (x) { return n.indexOf(x) >= 0; });
+    return [
+      [valor.length >= MIN_CLAVE, 'Al menos ' + MIN_CLAVE + ' caracteres'],
+      [/[A-Za-zÁÉÍÓÚÜáéíóúüÑñ]/.test(valor) && /\d/.test(valor), 'Letras y números'],
+      [!!valor && !conUsuario && !conNombre, 'Que no tenga tu usuario ni tu nombre'],
+      [!!valor && !claveObvia(n), 'Que no sea fácil de adivinar (nada de «gestión», «CDMX», meses o «qwerty»)']
+    ];
+  }
+
+  function formularioClave(alTerminar, actualConocida) {
+    var usuario = (E.ini && E.ini.yo.usuario) || E.usuarioEntrada || '';
+    var nombre = (E.ini && E.ini.yo.nombre) || E.nombreEntrada || '';
+    var actual = campoClave('Contraseña actual', { valor: actualConocida || '', enter: 'next' });
+    var nueva = campoClave('Contraseña nueva', { autocomplete: 'new-password', enter: 'next', placeholder: 'Por ejemplo, una frase corta con números' });
+    var repite = campoClave('Repítela', { autocomplete: 'new-password', placeholder: 'Escríbela otra vez' });
+    var lista = h('ul', { class: 'reglas', 'aria-live': 'polite' });
+    var msg = h('div', { role: 'alert' });
+    function pintar() {
+      vaciar(lista);
+      reglasClave(nueva.input.value, usuario, nombre).concat([[nueva.input.value && nueva.input.value === repite.input.value, 'Las dos coinciden']]).forEach(function (r) {
+        lista.appendChild(h('li', { class: r[0] ? 'ok' : '' }, r[1]));
+      });
+    }
+    nueva.input.addEventListener('input', pintar); repite.input.addEventListener('input', pintar); pintar();
+    var boton = h('button', { class: 'login__boton', type: 'submit' }, 'Guardar contraseña');
+    var form = h('form', { class: 'login__form', novalidate: true, onsubmit: function (ev) {
+      ev.preventDefault();
+      vaciar(msg);
+      if (!actualConocida && !actual.input.value) { actual.falta('Escribe tu contraseña actual.'); return; }
+      var fallas = reglasClave(nueva.input.value, usuario, nombre).filter(function (r) { return !r[0]; });
+      if (fallas.length) { nueva.falta('Le falta: ' + fallas.map(function (r) { return r[1].charAt(0).toLowerCase() + r[1].slice(1); }).join('; ') + '.'); return; }
+      if (nueva.input.value !== repite.input.value) { repite.falta('No coincide con la nueva.'); return; }
+      boton.disabled = true; boton.textContent = 'Guardando…';
+      llamar('cambiarClave', { actual: actualConocida || actual.input.value, nueva: nueva.input.value }).then(function (r) {
+        E.token = r.token; guardarLocal('cg_token', r.token);
+        aviso('Contraseña actualizada.', 'ok');
+        alTerminar();
+      }).catch(function (e) { boton.disabled = false; boton.textContent = 'Guardar contraseña'; vaciar(msg).appendChild(h('p', { class: 'login__error' }, e.message)); });
+    } }, actualConocida ? null : actual.el, nueva.el, lista, repite.el, msg, boton);
+    return form;
+  }
+
+  function pantallaCambiarClave(forzada, temporal, motivo) {
+    if (!forzada) {
+      var v = ventana({ titulo: 'Cambiar mi contraseña', ancho: 440, cuerpo: h('div', { class: 'modal-clave' }, formularioClave(function () { v.cerrar(); })) });
+      return;
+    }
+    var sub = motivo === 'reglas'
+      ? 'Tu contraseña ya no cumple las reglas nuevas (10 caracteres o más y nada fácil de adivinar). Elige otra.'
+      : 'Tu contraseña es temporal. Elige una que solo tú conozcas.';
+    lienzoEntrada([].concat(encabezadoTarjeta(motivo === 'reglas' ? 'Cambia tu contraseña' : 'Crea tu contraseña', sub),
+      [formularioClave(function () { cargarInicio(); }, temporal),
+        h('p', { class: 'login__ayuda' }, h('a', { href: '#', onclick: function (ev) { ev.preventDefault(); terminarSesion(); } }, 'Salir sin cambiarla'))]));
+  }
+
+  /* ─────────── Verificación en dos pasos ─────────── */
+
+  /** Activarla: QR (o la clave escrita), el primer código y la contraseña. */
+  function panelActivar2fa(alTerminar) {
+    var cont = h('div', { class: 'dospasos' }, h('p', { class: 'dospasos__cargando' }, 'Preparando…'));
+    llamar('totpIniciar').then(function (s) {
+      var codigo = campoCodigo('Código que muestra la app');
+      var clave = campoClave('Tu contraseña', { enter: 'go' });
+      var msg = h('div', { role: 'alert' });
+      var boton = h('button', { class: 'login__boton', type: 'submit' }, 'Activar');
+      var qr;
+      try { qr = QR.svg(s.uri, 208); } catch (e) { qr = null; }
+      vaciar(cont).appendChild(h('form', { class: 'login__form', novalidate: true, onsubmit: function (ev) {
+        ev.preventDefault();
+        vaciar(msg);
+        if (codigo.valor().length !== 6) { codigo.falta('Escribe los 6 dígitos.'); return; }
+        if (!clave.input.value) { clave.falta('Escribe tu contraseña.'); return; }
+        boton.disabled = true; boton.textContent = 'Activando…';
+        llamar('totpConfirmar', { codigo: codigo.valor(), clave: clave.input.value }).then(function (r) {
+          E.token = r.token; guardarLocal('cg_token', r.token);
+          if (E.ini) E.ini.yo.dosPasos = true;
+          aviso('Listo: la verificación en dos pasos quedó activada. Las demás sesiones se cerraron.', 'ok');
+          alTerminar();
+        }).catch(function (e) {
+          boton.disabled = false; boton.textContent = 'Activar';
+          vaciar(msg).appendChild(h('p', { class: 'login__error' }, e.message));
+        });
+      } },
+        h('ol', { class: 'dospasos__pasos' },
+          h('li', null, 'Instala en tu celular una app de autenticación: Google Authenticator, Microsoft Authenticator u otra.'),
+          h('li', null, 'En la app, agrega una cuenta y escanea este código. Si no puedes, elige «escribir la clave» y copia la clave de abajo.'),
+          h('li', null, 'Escribe el código de 6 dígitos que aparece y tu contraseña.')),
+        h('div', { class: 'dospasos__qr' }, qr || h('p', null, 'No se pudo dibujar el código; usa la clave.'),
+          h('div', { class: 'dospasos__clave' }, h('span', null, 'Clave'), h('code', null, s.secreto))),
+        codigo.el, clave.el, msg, boton));
+      codigo.input.focus();
+    }).catch(function (e) { vaciar(cont).appendChild(h('p', { class: 'login__error' }, e.message)); });
+    return cont;
+  }
+
+  function pantallaActivar2fa(forzada) {
+    if (!forzada) {
+      var v = ventana({ titulo: 'Activar la verificación en dos pasos', ancho: 480, cuidar: true, cuerpo: h('div', { class: 'modal-clave' }, panelActivar2fa(function () { v.cerrar(); if (E.vista === 'inicio') irA('inicio', null, { sinHistorial: true }); })) });
+      return;
+    }
+    lienzoEntrada([].concat(encabezadoTarjeta('Verificación en dos pasos', 'Para los administradores es obligatoria. Te pedirá un código de tu celular además de la contraseña.'),
+      [panelActivar2fa(function () { cargarInicio(); }),
+        h('p', { class: 'login__ayuda' }, h('a', { href: '#', onclick: function (ev) { ev.preventDefault(); salir(); } }, 'Salir'))]));
+  }
+
+  /* ─────────── La sesión terminó con algo a medias ───────────
+     Se pide la contraseña (y el código, si tiene dos pasos) ENCIMA de lo que
+     estaba haciendo. Al entrar, la petición que falló se manda otra vez sola
+     y lo escrito no se pierde. «Salir» sí descarta todo. */
+  var reentrando = null;
+  function reautenticar(mensaje) {
+    if (reentrando) return reentrando;
+    reentrando = new Promise(function (ok, mal) {
+      var usuario = E.ini.yo.usuario, ticket = null;
+      var clave = campoClave('Contraseña');
+      var codigo = campoCodigo('Código de 6 dígitos');
+      codigo.el.classList.add('oculto');
+      var msg = h('div', { role: 'alert' });
+      var boton = h('button', { class: 'btn btn--prim', type: 'button', onclick: function () { enviar(); } }, 'Volver a entrar');
+      var terminar = function () { reentrando = null; v.cerrar(); };
+      function enviar() {
+        vaciar(msg);
+        if (!ticket && !clave.input.value) { clave.falta('Escribe tu contraseña.'); return; }
+        if (ticket && codigo.valor().length !== 6) { codigo.falta('Escribe los 6 dígitos.'); return; }
+        boton.disabled = true;
+        (ticket ? llamar('entrarCodigo', { ticket: ticket, codigo: codigo.valor() }) : llamar('entrar', { usuario: usuario, clave: clave.input.value, equipo: leerEquipo(usuario) }))
+          .then(function (r) {
+            boton.disabled = false;
+            if (r.requiereCodigo) {
+              ticket = r.ticket;
+              clave.el.classList.add('oculto'); codigo.el.classList.remove('oculto'); codigo.input.focus();
+              return;
+            }
+            if (r.debe_cambiar || r.activar2fa) {
+              // Le cambiaron algo a la cuenta: no se puede seguir sin pasar por la entrada normal.
+              reentrando = null;
+              pila.slice().forEach(function (x) { x.cerrar(); });
+              cerrarPanel();
+              var e1 = new Error('Tu cuenta necesita un paso más antes de seguir.'); e1.codigo = 'SESION';
+              mal(e1);
+              E.token = r.token; guardarLocal('cg_token', r.token);
+              trasEntrar(r, usuario, clave.input.value, !!leerEquipo(usuario));
+              return;
+            }
+            E.token = r.token; guardarLocal('cg_token', r.token);
+            if (r.inicio) ['acciones', 'yo', 'orden', 'tipos', 'mantenimiento', 'config', 'version', 'indicadores', 'directorio'].forEach(function (k) { if (r.inicio[k] !== undefined) E.ini[k] = r.inicio[k]; });
+            terminar();
+            aviso('Listo: sigues donde estabas.', 'ok');
+            ok();
+          }).catch(function (e) {
+            boton.disabled = false;
+            if (e.codigo === 'CODIGO_VENCIDO' || (e.extra && e.extra.reiniciar)) {
+              ticket = null; codigo.input.value = '';
+              codigo.el.classList.add('oculto'); clave.el.classList.remove('oculto'); clave.input.value = '';
+            }
+            vaciar(msg).appendChild(h('div', { class: 'alerta alerta--error' }, e.message));
+          });
+      }
+      var v = ventana({ titulo: 'Tu sesión terminó', ancho: 440, fija: true,
+        cuerpo: [h('p', { style: { margin: 0 } }, (mensaje && !/Vuelve a entrar/.test(mensaje) ? mensaje + ' ' : '') +
+          'Escribe tu contraseña para seguir. Lo que estabas capturando sigue aquí y se guarda en cuanto entres.'),
+          h('form', { class: 'login__form', novalidate: true, onsubmit: function (ev) { ev.preventDefault(); enviar(); } }, clave.el, codigo.el,
+            h('button', { type: 'submit', class: 'oculto', tabindex: '-1', 'aria-hidden': 'true' })), msg],
+        pie: [h('button', { class: 'btn btn--fantasma', type: 'button', onclick: function () {
+          terminar();
+          var e = new Error(mensaje || 'Tu sesión terminó.'); e.codigo = 'SESION';
+          mal(e);
+          terminarSesion(mensaje);
+        } }, 'Salir sin guardar'), boton] });
+    });
+    return reentrando;
+  }
+
+  /** Olvida las listas, Pendientes y Mis asuntos guardados en memoria (al entrar y al salir). */
+  function olvidarDatos() { E.gen++; E.listas = {}; E.pend = null; E.mis = null; E.lista = []; E.listaClave = null; E.iniT = 0; }
+
+  function terminarSesion(mensaje) {
+    // Los encabezados de la pantalla de entrada salen de lo que ya se tenía
+    if (!E.publico && E.ini) E.publico = { encabezados: E.ini.config.encabezados, version: E.ini.version };
+    // Al salir se olvida todo lo de esa persona (importante en computadoras compartidas)
+    E.token = null; E.ini = null; E.busqueda = null; E.inf = null; E.lista = []; cacheTurno = {}; dibujarInformes = null;
+    E.tipo = null; E.anio = null; E.mostrar = 60; E.filtros = { q: '', estatus: '', acuse: '' }; E.sel = null;
+    reentrando = null;
+    olvidarDatos();
+    guardarLocal('cg_token', null);
+    pila.slice().forEach(function (v) { v.cerrar(); });
+    cerrarPanel();
+    if (E.publico) { pantallaEntrar(mensaje); return; }
+    // Sesión vencida al recargar: primero los encabezados públicos
+    llamar('estado', null, { silencioso: true }).then(function (p) { E.publico = p; E.publicoEn = Date.now(); }, function () {})
+      .then(function () { if (!E.token) pantallaEntrar(mensaje); });
+  }
+</script>

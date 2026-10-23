@@ -120,7 +120,7 @@ const REGLAS_GITIGNORE = ["base/", "capturas/", "*.xlsx", ".clasp.json", ".clasp
 // Lo ÚNICO que se sube a GitHub: el código y la documentación. Cualquier otro
 // archivo nuevo (un escaneo, una foto, un Excel, un .json exportado…) detiene
 // la publicación aunque .gitignore no lo cubra.
-const PERMITIDOS = [/^apps-script\//, /^herramientas\//, /^pruebas\//, /^web\//, /^[^/]+\.md$/i,
+const PERMITIDOS = [/^apps-script\//, /^herramientas\//, /^pruebas\//, /^web\//, /^\.github\//, /^[^/]+\.md$/i,
   /^package(-lock)?\.json$/, /^vercel\.json$/, /^\.gitignore$/, /^\.gitattributes$/, /^\.clasp\.json\.ejemplo$/, /^\.claspignore$/];
 const EXT_DATOS = /\.(pdf|xlsx?|xlsm|ods|csv|tsv|docx?|odt|rtf|zip|rar|7z|json|jpe?g|png|gif|webp|heic|heif|tiff?|bmp|txt|eml|msg)$/i;
 const EXCEPCIONES = [/^web\/[^/]+\.(png|svg)$/i, /^package(-lock)?\.json$/, /^vercel\.json$/, /^apps-script\/appsscript\.json$/];

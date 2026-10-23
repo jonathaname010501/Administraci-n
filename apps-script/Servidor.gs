@@ -11,21 +11,26 @@
  *   1. Toda función que NO deba poder llamarse desde el navegador termina
  *      en guion bajo (_). Apps Script no deja que google.script.run llame
  *      funciones privadas. Las únicas públicas son: doGet, doPost, api,
- *      instalar, restablecerAdministrador, revisarSeguridad, respaldoSemanal
- *      (las últimas cuatro se protegen solas; ver Instalacion.gs).
+ *      instalar, restablecerAdministrador, revisarSeguridad, revisarRespaldos,
+ *      respaldoDiario, respaldoSemanal y avisosDiarios (todas se protegen
+ *      solas; ver Instalacion.gs, Respaldos.gs y Avisos.gs).
  *   2. Nunca se devuelven contraseñas, "sellos" ni IDs de Drive al cliente
  *      más allá de lo necesario.
  *   3. Lo que escribe el usuario se guarda como texto: si empieza con
  *      = + - @ se le antepone un apóstrofo para que la hoja no lo tome como
  *      fórmula.
+ *   4. Todo lo que ESCRIBE en la hoja va dentro del candado (candado_ /
+ *      soltar_), incluida la Bitácora. Si no, dos personas al mismo tiempo
+ *      pueden escribir en el mismo renglón y una de las dos se pierde.
+ *   5. Este proyecto tiene varios archivos .gs. Lo que se evalúa al cargar
+ *      (como ACCIONES_) NO debe llamar funciones de otros archivos: Google
+ *      carga los archivos en orden y la de otro archivo puede no existir aún.
+ *      Por eso las acciones de otros archivos van envueltas en function () {…}.
  * ════════════════════════════════════════════════════════════════════════
  */
 
-var VERSION = '1.6.0';   // súbela junto con VERSION_APP (App.html) en cada cambio
+var VERSION = '1.7.0';   // súbela junto con VERSION_APP (App.html) en cada cambio
 var ZONA = 'America/Mexico_City';
-var ITERACIONES_CLAVE = 1000;      // PBKDF2-HMAC-SHA256
-var MAX_INTENTOS = 5;              // contraseñas fallidas antes de bloquear
-var MINUTOS_BLOQUEO = 15;
 var SESION_SEG = 3 * 60 * 60;      // 3 h sin actividad cierran la sesión
 var MAX_ARCHIVO_MB = 10;
 var MAX_VARIOS = 100;              // destinatarios por vez en «Varios destinatarios»
@@ -52,7 +57,9 @@ var COLS = {
   Usuarios: ['usuario', 'nombre', 'rol', 'tipos', 'activo', 'clave', 'debe_cambiar',
     'intentos', 'bloqueado_hasta', 'sello', 'creado_en', 'ultimo_acceso',
     // ── 1.5.0 · SI = puede ver Informes (los administradores siempre pueden)
-    'informes'],
+    'informes',
+    // ── 1.7.0 · correo para avisos y verificación en dos pasos (secreto cifrado con la pimienta)
+    'correo', 'totp'],
   Bitacora: ['fecha', 'usuario', 'accion', 'registro_id', 'detalle'],
   Config: ['clave', 'valor', 'descripcion']
 };
@@ -116,7 +123,7 @@ function doGet() {
   var html = '<!DOCTYPE html><html lang="es"><head><base target="_top"><meta charset="utf-8">' +
     '<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>' +
     '<link href="' + FUENTES_URL + '" rel="stylesheet">' +
-    incluir_('Estilos') + '</head><body>' + incluir_('Index') + incluir_('Excel') + incluir_('App') + '</body></html>';
+    incluir_('Estilos') + '</head><body>' + incluir_('Index') + incluir_('Excel') + scriptApp_() + '</body></html>';
   return HtmlService.createHtmlOutput(html)
     .setTitle('Control de Gestión')
     .addMetaTag('viewport', 'width=device-width, initial-scale=1')
@@ -125,6 +132,21 @@ function doGet() {
 
 function incluir_(nombre) {
   return HtmlService.createHtmlOutputFromFile(nombre).getContent();
+}
+
+/**
+ * La aplicación está repartida en varios archivos App*.html (cada uno con su
+ * <script> para que Google lo trate como código y no como texto). Aquí se les
+ * quita esa envoltura y se juntan en UNA sola función, igual que hace
+ * herramientas/armar-web.mjs para Vercel. El orden importa: el último arranca.
+ */
+var FRAGMENTOS_APP = ['App', 'AppEntrada', 'AppQR', 'AppPortal', 'AppLibreta', 'AppDetalle', 'AppFormulario', 'AppInformes', 'AppAdmin', 'AppArranque'];
+
+function scriptApp_() {
+  var partes = FRAGMENTOS_APP.map(function (n) {
+    return incluir_(n).replace(/^\s*<script>/, '').replace(/<\/script>\s*$/, '');
+  });
+  return '<script>(function () {\n\'use strict\';\n' + partes.join('\n') + '\n})();</script>';
 }
 
 /**
@@ -161,6 +183,7 @@ function api(token, accion, datos) {
     if (typeof accion !== 'string') throw falla_('PETICION', 'Petición inválida.');
     if (accion === 'estado') return { ok: true, datos: estadoPublico_() };
     if (accion === 'entrar') return { ok: true, datos: entrar_(datos) };
+    if (accion === 'entrarCodigo') return { ok: true, datos: entrarCodigo_(datos) };
     // «ping» solo pregunta si la sesión sigue viva: NO cuenta como actividad
     // (si no, una pestaña abierta mantendría la sesión para siempre).
     var yo = sesion_(token, accion === 'ping');
@@ -171,20 +194,43 @@ function api(token, accion, datos) {
     if (yo.debe_cambiar && accion !== 'cambiarClave' && accion !== 'salir') {
       throw falla_('CAMBIAR_CLAVE', 'Antes de seguir tienes que cambiar tu contraseña temporal.');
     }
+    // Si Configuración exige la verificación en dos pasos a los administradores,
+    // quien no la tiene solo puede activarla (o salir).
+    if (debeActivar2fa_(yo) && ['totpIniciar', 'totpConfirmar', 'cambiarClave', 'salir', 'ping'].indexOf(accion) < 0) {
+      throw falla_('ACTIVAR_2FA', 'Antes de seguir activa la verificación en dos pasos (es obligatoria para administradores).');
+    }
     if (a.rol && !tieneRol_(yo, a.rol)) throw falla_('PERMISO', 'No tienes permiso para esto.');
     if (a.permiso && !a.permiso(yo)) throw falla_('PERMISO', 'No tienes permiso para esto.');
-    return { ok: true, datos: a.fn(yo, datos, token) };
+    var r = { ok: true, datos: a.fn(yo, datos, token) };
+    try { vigilarConsulta_(yo, accion, datos); } catch (e1) { console.warn('vigilar: ' + (e1 && e1.message)); }
+    return r;
   } catch (e) {
     if (e && e.codigo) return { ok: false, codigo: e.codigo, error: e.message, extra: e.extra || null };
     var ref = Utilities.getUuid().slice(0, 8);
     console.error('api(' + accion + ') ref ' + ref + ': ' + (e && e.stack ? e.stack : e));
     return { ok: false, codigo: 'INTERNO', error: 'Ocurrió un error interno (referencia ' + ref + '). Intenta de nuevo.' };
+  } finally {
+    cerrarPeticion_();
+  }
+}
+
+/**
+ * Al terminar cada petición (ya sin el candado): la caché de Registros se da
+ * por vieja si algo se escribió, y se mandan los correos pendientes. Nada de
+ * esto puede tumbar la respuesta.
+ */
+function cerrarPeticion_() {
+  try { publicarCambiosRegistros_(); } catch (e) { console.error('caché: ' + (e && e.message)); }
+  var avisos = MEMO_.avisos || [];
+  MEMO_.avisos = [];
+  if (avisos.length) {
+    try { enviarAvisos_(avisos); } catch (e2) { console.error('avisos: ' + (e2 && e2.message)); }
   }
 }
 
 var ACCIONES_ = {
   salir: { fn: salir_ },
-  cambiarClave: { fn: cambiarClave_ },
+  cambiarClave: { fn: function (yo, d) { return cambiarClave_(yo, d); } },   // en Seguridad.gs
   inicio: { fn: inicio_ },
   indicadores: { fn: function (yo) { return indicadores_(yo); } },
   listar: { fn: listar_ },
@@ -216,7 +262,14 @@ var ACCIONES_ = {
   // 1.5.0 · Informes: administradores y quien tenga «informes = SI» en Usuarios
   informes: { fn: informes_, permiso: function (yo) { return yo.rol === 'admin' || yo.informes === true; } },
   // 1.6.0 · Velocidad: las listas del año de todas las libretas en una vuelta
-  listarTodo: { fn: listarTodo_ }
+  listarTodo: { fn: listarTodo_ },
+  // 1.7.0 · Las de otros archivos van envueltas (ver regla 5 arriba)
+  guardarLote: { fn: function (yo, d) { return guardarLote_(yo, d); }, rol: 'captura' },
+  miCuenta: { fn: function (yo, d) { return miCuenta_(yo, d); } },
+  totpIniciar: { fn: function (yo, d) { return totpIniciar_(yo, d); } },
+  totpConfirmar: { fn: function (yo, d) { return totpConfirmar_(yo, d); } },
+  totpQuitar: { fn: function (yo, d) { return totpQuitar_(yo, d); } },
+  generarOficio: { fn: function (yo, d) { return generarOficio_(yo, d); }, rol: 'captura' }
 };
 
 /** Acciones que este usuario puede usar. La página las consulta para mostrar
@@ -230,12 +283,38 @@ function accionesDe_(yo) {
 }
 
 /**
+ * Toma el candado del script y lo anota en MEMO_, para que lo que se llama
+ * adentro (como bitacora_) sepa que ya está protegido y no lo pida otra vez.
+ *  intentar = true → no espera más de «ms»: devuelve null si no se pudo.
+ */
+function candado_(ms, intentar) {
+  var lock = LockService.getScriptLock();
+  if (intentar) {
+    if (!lock.tryLock(ms)) return null;
+  } else {
+    try { lock.waitLock(ms); } catch (e) {
+      throw falla_('OCUPADO', 'El sistema está ocupado guardando otros cambios. Espera unos segundos e intenta de nuevo.');
+    }
+  }
+  MEMO_.candado = (MEMO_.candado || 0) + 1;
+  // Lo leído antes del candado puede estar viejo: Config y Usuarios se vuelven a leer.
+  MEMO_.cfg = null;
+  MEMO_.usr = null;
+  return lock;
+}
+
+function enCandado_() { return (MEMO_.candado || 0) > 0; }
+
+/**
  * Suelta el candado DESPUÉS de mandar a la hoja todo lo escrito (flush), para
  * que quien tome el candado enseguida lea las filas nuevas (patrón que recomienda
  * Google). Así nunca se repite un consecutivo aunque guarden al mismo tiempo.
+ * También aquí (después del flush, nunca antes) se da por vieja la caché de Registros.
  */
 function soltar_(lock) {
   try { SpreadsheetApp.flush(); } catch (e) { console.error('flush: ' + (e && e.message)); }
+  try { publicarCambiosRegistros_(); } catch (e2) { console.error('caché: ' + (e2 && e2.message)); }
+  MEMO_.candado = Math.max(0, (MEMO_.candado || 0) - 1);
   lock.releaseLock();
 }
 
@@ -253,58 +332,6 @@ function estadoPublico_() {
   var m = mantenimiento_(cfg);
   return { encabezados: [cfg.encabezado_1, cfg.encabezado_2, cfg.encabezado_3].filter(Boolean), version: VERSION,
     mantenimiento: m.activo ? { activo: true, mensaje: m.mensaje } : { activo: false } };
-}
-
-function entrar_(d) {
-  var usuario = String(d.usuario || '').trim().toLowerCase();
-  var clave = String(d.clave || '');
-  var cache = CacheService.getScriptCache();
-  // Freno general contra ataques de fuerza bruta a muchos usuarios
-  var minuto = 'login:' + Utilities.formatDate(new Date(), ZONA, 'yyyyMMddHHmm');
-  var intentosMinuto = Number(cache.get(minuto) || 0);
-  if (intentosMinuto >= 60) throw falla_('ESPERA', 'Demasiados intentos. Espera un minuto.');
-  cache.put(minuto, String(intentosMinuto + 1), 120);
-
-  var t = tabla_(HOJAS.USR);
-  var u = null;
-  for (var i = 0; i < t.filas.length; i++) if (t.filas[i].o.usuario === usuario) { u = t.filas[i]; break; }
-  var generico = falla_('CREDENCIALES', 'Usuario o contraseña incorrectos.');
-  if (!u || !usuario || !clave) {
-    verificarClave_(clave || 'x', 'pbkdf2$' + ITERACIONES_CLAVE + '$AAAAAAAAAAAAAAAAAAAAAA==$AAAA'); // mismo tiempo de respuesta
-    throw generico;
-  }
-  var o = u.o;
-  var ahora = new Date();
-  if (o.bloqueado_hasta && new Date(o.bloqueado_hasta) > ahora) {
-    var min = Math.ceil((new Date(o.bloqueado_hasta) - ahora) / 60000);
-    throw falla_('BLOQUEADO', 'Cuenta bloqueada por intentos fallidos. Intenta en ' + min + ' min o pide a un administrador que la desbloquee.');
-  }
-  if (!verificarClave_(clave, o.clave)) {
-    o.intentos = Number(o.intentos || 0) + 1;
-    if (o.intentos >= MAX_INTENTOS) {
-      o.bloqueado_hasta = new Date(ahora.getTime() + MINUTOS_BLOQUEO * 60000).toISOString();
-      o.intentos = 0;
-      bitacora_(usuario, 'bloqueo', '', 'Cuenta bloqueada ' + MINUTOS_BLOQUEO + ' min por ' + MAX_INTENTOS + ' contraseñas incorrectas.');
-    } else {
-      bitacora_(usuario, 'entrada fallida', '', 'Contraseña incorrecta (' + o.intentos + ' de ' + MAX_INTENTOS + ').');
-    }
-    escribirFila_(t.sh, HOJAS.USR, u.fila, o);
-    throw generico;
-  }
-  if (o.activo !== 'SI') throw falla_('INACTIVO', 'Tu cuenta está desactivada. Habla con un administrador.');
-  var mant = mantenimiento_();
-  if (mant.activo && o.rol !== 'admin') throw falla_('MANTENIMIENTO', mant.mensaje);
-  o.intentos = 0;
-  o.bloqueado_hasta = '';
-  o.ultimo_acceso = sello_(ahora);
-  escribirFila_(t.sh, HOJAS.USR, u.fila, o);
-  bitacora_(usuario, 'entrar', '', '');
-  var res = { token: abrirSesion_(o), debe_cambiar: o.debe_cambiar === 'SI', nombre: o.nombre };
-  // Para no hacer otra vuelta al servidor, la entrada ya trae los datos del portal.
-  if (!res.debe_cambiar) {
-    try { res.inicio = inicio_(yoDe_(o)); } catch (e) { console.warn('entrar: sin inicio (' + e.message + ')'); }
-  }
-  return res;
 }
 
 function abrirSesion_(o) {
@@ -336,7 +363,8 @@ function sesion_(token, sinRenovar) {
 function yoDe_(u) {
   return {
     usuario: u.usuario, nombre: u.nombre, rol: u.rol, debe_cambiar: u.debe_cambiar === 'SI',
-    tipos: tiposDeUsuario_(u), informes: u.rol === 'admin' || u.informes === 'SI'
+    tipos: tiposDeUsuario_(u), informes: u.rol === 'admin' || u.informes === 'SI',
+    dosPasos: !!u.totp, correo: u.correo || ''
   };
 }
 
@@ -352,79 +380,10 @@ function salir_(yo, d, token) {
   return true;
 }
 
-function cambiarClave_(yo, d) {
-  var t = tabla_(HOJAS.USR);
-  var u = t.filas.filter(function (f) { return f.o.usuario === yo.usuario; })[0];
-  if (!verificarClave_(String(d.actual || ''), u.o.clave)) throw falla_('CREDENCIALES', 'La contraseña actual no es correcta.');
-  var nueva = String(d.nueva || '');
-  validarClave_(nueva, yo.usuario);
-  if (verificarClave_(nueva, u.o.clave)) throw falla_('DATOS', 'La nueva contraseña debe ser distinta de la actual.');
-  u.o.clave = hashClave_(nueva);
-  u.o.debe_cambiar = 'NO';
-  u.o.sello = nuevoSello_();           // cierra las demás sesiones
-  escribirFila_(t.sh, HOJAS.USR, u.fila, u.o);
-  bitacora_(yo.usuario, 'cambio de contraseña', '', '');
-  return { token: abrirSesion_(u.o) };
-}
-
-function validarClave_(clave, usuario) {
-  if (clave.length < 8) throw falla_('DATOS', 'La contraseña debe tener al menos 8 caracteres.');
-  if (clave.length > 128) throw falla_('DATOS', 'La contraseña es demasiado larga.');
-  if (!/[A-Za-zÁÉÍÓÚáéíóúÑñ]/.test(clave) || !/\d/.test(clave)) throw falla_('DATOS', 'La contraseña debe tener letras y números.');
-  if (clave.toLowerCase().indexOf(String(usuario).toLowerCase()) >= 0) throw falla_('DATOS', 'La contraseña no puede contener tu usuario.');
-}
-
-/** PBKDF2-HMAC-SHA256 con sal aleatoria. Formato: pbkdf2$iter$sal_b64$hash_b64 */
-function hashClave_(clave, salB64, iter) {
-  iter = iter || ITERACIONES_CLAVE;
-  var sal = salB64 ? Utilities.base64Decode(salB64) : bytesAleatorios_(16);
-  var dk = pbkdf2_(Utilities.newBlob(clave).getBytes(), sal, iter);
-  return 'pbkdf2$' + iter + '$' + Utilities.base64Encode(sal) + '$' + Utilities.base64Encode(dk);
-}
-
-function pbkdf2_(clave, sal, iter) {
-  var bloque = sal.concat([0, 0, 0, 1]);
-  var u = Utilities.computeHmacSignature(Utilities.MacAlgorithm.HMAC_SHA_256, bloque, clave);
-  var t = u.slice();
-  for (var i = 1; i < iter; i++) {
-    u = Utilities.computeHmacSignature(Utilities.MacAlgorithm.HMAC_SHA_256, u, clave);
-    for (var j = 0; j < t.length; j++) t[j] ^= u[j];
-  }
-  return t;
-}
-
-function verificarClave_(clave, guardada) {
-  var p = String(guardada || '').split('$');
-  if (p.length !== 4 || p[0] !== 'pbkdf2') return false;
-  var calc = hashClave_(clave, p[2], Number(p[1])).split('$')[3];
-  var a = calc, b = p[3], dif = a.length ^ b.length;
-  for (var i = 0; i < Math.min(a.length, b.length); i++) dif |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  return dif === 0;
-}
-
-function bytesAleatorios_(n) {
-  var out = [];
-  while (out.length < n) {
-    out = out.concat(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256,
-      Utilities.getUuid() + Utilities.getUuid() + Date.now(), Utilities.Charset.UTF_8));
-  }
-  return out.slice(0, n);
-}
-
-function nuevoSello_() { return Utilities.getUuid().replace(/-/g, ''); }
-
-function claveTemporal_() {
-  var abc = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz';
-  var dig = '23456789';
-  var b = bytesAleatorios_(12).map(function (x) { return x & 0xff; });
-  var s = '';
-  for (var i = 0; i < 8; i++) s += abc.charAt(b[i] % abc.length);
-  return s.slice(0, 4) + dig.charAt(b[8] % 8) + dig.charAt(b[9] % 8) + s.slice(4);
-}
-
+/** El usuario (fila de la pestaña Usuarios). Se lee una vez por petición; al escribir en Usuarios o tomar el candado se vuelve a leer. */
 function buscarUsuario_(usuario) {
-  var t = tabla_(HOJAS.USR);
-  for (var i = 0; i < t.filas.length; i++) if (t.filas[i].o.usuario === usuario) return t.filas[i].o;
+  if (!MEMO_.usr) MEMO_.usr = tabla_(HOJAS.USR).filas;
+  for (var i = 0; i < MEMO_.usr.length; i++) if (MEMO_.usr[i].o.usuario === usuario) return MEMO_.usr[i].o;
   return null;
 }
 
@@ -442,7 +401,7 @@ function puedeTipo_(yo, tipo) {
 
 function inicio_(yo) {
   var cfg = config_();
-  var regs = tabla_(HOJAS.REG).filas;
+  var regs = tablaLectura_(HOJAS.REG).filas;
   var anioActual = Number(Utilities.formatDate(new Date(), ZONA, 'yyyy'));
   var anios = {}, conteos = {}, elaboro = {};
   anios[anioActual] = true;
@@ -456,10 +415,9 @@ function inicio_(yo) {
   var tipos = {};
   yo.tipos.forEach(function (k) { tipos[k] = TIPOS[k]; });
   return {
-    yo: { usuario: yo.usuario, nombre: yo.nombre, rol: yo.rol, rolNombre: ROLES[yo.rol], tipos: yo.tipos },
+    yo: { usuario: yo.usuario, nombre: yo.nombre, rol: yo.rol, rolNombre: ROLES[yo.rol], tipos: yo.tipos, dosPasos: yo.dosPasos, correo: yo.correo },
     tipos: tipos, orden: yo.tipos, estatus: ESTATUS, roles: ROLES, todosTipos: TIPOS,
-    config: { encabezados: [cfg.encabezado_1, cfg.encabezado_2, cfg.encabezado_3].filter(Boolean),
-      plantilla_OFS: cfg.plantilla_OFS, plazo_dias: cfg.plazo_dias, url_web: cfg.url_web || '' },
+    config: configPublica_(cfg, yo),
     anioActual: anioActual,
     anios: Object.keys(anios).map(Number).sort(function (a, b) { return b - a; }),
     conteos: conteos,
@@ -473,9 +431,40 @@ function inicio_(yo) {
   };
 }
 
+/** Lo de Config que necesita la página (sin nada que solo deba ver el dueño). */
+function configPublica_(cfg, yo) {
+  var c = {
+    encabezados: [cfg.encabezado_1, cfg.encabezado_2, cfg.encabezado_3].filter(Boolean),
+    plantilla_OFS: cfg.plantilla_OFS, plazo_dias: cfg.plazo_dias, url_web: cfg.url_web || '',
+    dias_inhabiles: diasInhabiles_(cfg), acuse_desde: fechaValida_(String(cfg.acuse_desde || '')) ? cfg.acuse_desde : '',
+    plantillaDoc: !!idPlantillaDoc_(cfg)
+  };
+  if (yo && yo.rol === 'admin') {
+    c.avisos_correo = cfg.avisos_correo === 'SI' ? 'SI' : 'NO';
+    c.avisos_detalle = cfg.avisos_detalle === 'SI' ? 'SI' : 'NO';
+    c.dos_pasos_admin = cfg.dos_pasos_admin === 'SI' ? 'SI' : 'NO';
+    c.plantilla_doc_OFS = cfg.plantilla_doc_OFS || '';
+  }
+  return c;
+}
+
+/** Días inhábiles de Configuración: ['AAAA-MM-DD', …] ordenados y sin repetir. */
+function diasInhabiles_(cfg) {
+  var vistos = {};
+  (String((cfg || config_()).dias_inhabiles || '').match(/\d{4}-\d{2}-\d{2}/g) || []).forEach(function (d) { if (fechaValida_(d)) vistos[d] = true; });
+  return Object.keys(vistos).sort();
+}
+
+/** ¿Este registro cuenta para «sin acuse»? (OFS sin acuse, no cancelado, y desde la fecha de corte si la hay) */
+function cuentaSinAcuse_(r, corte) {
+  return r.tipo === 'OFS' && r.acuse !== 'SI' && r.estatus !== 'Cancelado' && (!corte || String(r.fecha || '') >= corte);
+}
+
 /** Números de las tarjetas del portal: por libreta y en total (solo libretas propias). */
 function indicadores_(yo, regs) {
-  regs = regs || tabla_(HOJAS.REG).filas;
+  regs = regs || tablaLectura_(HOJAS.REG).filas;
+  var cfg = config_();
+  var corte = fechaValida_(String(cfg.acuse_desde || '')) ? cfg.acuse_desde : '';
   var hoy = Utilities.formatDate(new Date(), ZONA, 'yyyy-MM-dd');
   var anio = Number(hoy.slice(0, 4)), mes = hoy.slice(0, 7);
   var porTipo = {}, global = { porAtender: 0, vencidos: 0, venceHoy: 0, sinAcuse: 0 };
@@ -500,14 +489,14 @@ function indicadores_(yo, regs) {
       }
     }
     // global.sinAcuse = la sección "sin acuse" de Pendientes (sin repetir lo que ya está por atender)
-    if (r.tipo === 'OFS' && r.acuse !== 'SI' && r.estatus !== 'Cancelado' && !activo && Number(r.anio) >= anio - 1) global.sinAcuse++;
+    if (cuentaSinAcuse_(r, corte) && !activo && Number(r.anio) >= anio - 1) global.sinAcuse++;
     if (Number(r.anio) === anio) {
       p.total++;
-      if (r.tipo === 'OFS' && r.acuse !== 'SI' && r.estatus !== 'Cancelado') p.sinAcuse++;   // igual que el indicador de la libreta
+      if (cuentaSinAcuse_(r, corte)) p.sinAcuse++;   // igual que el indicador de la libreta
       if (String(r.fecha_recepcion || r.fecha).slice(0, 7) === mes) p.esteMes++;
     }
   });
-  return { porTipo: porTipo, global: global, mios: mios, hoy: hoy };
+  return { porTipo: porTipo, global: global, mios: mios, hoy: hoy, acuseDesde: corte };
 }
 
 function directorioActivo_() {
@@ -538,7 +527,7 @@ function listar_(yo, d) {
   var tipo = String(d.tipo || '');
   puedeTipo_(yo, tipo);
   var anio = Number(d.anio) || Number(Utilities.formatDate(new Date(), ZONA, 'yyyy'));
-  return tabla_(HOJAS.REG).filas
+  return tablaLectura_(HOJAS.REG).filas
     .filter(function (f) { return f.o.tipo === tipo && Number(f.o.anio) === anio; })
     .map(function (f) { return resumen_(f.o); })
     .sort(ordenLista_);
@@ -549,7 +538,7 @@ function listarTodo_(yo) {
   var anio = Number(Utilities.formatDate(new Date(), ZONA, 'yyyy'));
   var listas = {};
   yo.tipos.forEach(function (t) { listas[t] = []; });
-  tabla_(HOJAS.REG).filas.forEach(function (f) {
+  tablaLectura_(HOJAS.REG).filas.forEach(function (f) {
     if (listas[f.o.tipo] && Number(f.o.anio) === anio) listas[f.o.tipo].push(resumen_(f.o));
   });
   Object.keys(listas).forEach(function (t) { listas[t].sort(ordenLista_); });
@@ -557,7 +546,7 @@ function listarTodo_(yo) {
 }
 
 function obtener_(yo, d) {
-  var t = tabla_(HOJAS.REG);
+  var t = tablaLectura_(HOJAS.REG);
   var f = buscarRegistro_(t, d.id);
   puedeTipo_(yo, f.o.tipo);
   var r = nombreTurno_(publico_(f.o));
@@ -588,13 +577,7 @@ function ligados_(yo, filas, r) {
 function historial_(id, max) {
   id = String(id || '');
   var sh = hoja_(HOJAS.BIT), cols = COLS[HOJAS.BIT];
-  var cab = sh.getRange(1, 1, 1, cols.length).getValues()[0];
-  for (var c0 = 0; c0 < cols.length; c0++) {
-    if (String(cab[c0]).trim() !== cols[c0]) {
-      throw falla_('INSTALACION', 'Las columnas de la pestaña «' + HOJAS.BIT + '» no son las esperadas (columna ' + (c0 + 1) +
-        ' debería ser «' + cols[c0] + '»). No muevas columnas a mano; corre revisarSeguridad() desde el editor.');
-    }
-  }
+  revisarEncabezados_(sh, HOJAS.BIT);
   var n = sh.getLastRow();
   if (!id || n < 2) return [];
   var col = cols.indexOf('registro_id') + 1;
@@ -692,8 +675,7 @@ function guardar_(yo, d) {
   var tipo = String(d.tipo || '');
   var nuevo = !d.id;
   var limpio = validarRegistro_(d, tipo);
-  var lock = LockService.getScriptLock();
-  lock.waitLock(20000);
+  var lock = candado_(20000);
   try {
     var t = tabla_(HOJAS.REG);
     var ahora = sello_(new Date());
@@ -715,7 +697,10 @@ function guardar_(yo, d) {
       // «Duplicar»: se anota de cuál registro salió la copia (solo si existe y es de la misma libreta)
       var copia = d.copia_de ? t.filas.filter(function (x) { return x.o.id === String(d.copia_de) && x.o.tipo === tipo; })[0] : null;
       bitacora_(yo.usuario, 'alta', r.id, TIPOS[tipo].singular + ' ' + etiquetaNum_(r) + (copia ? ' (copia de ' + etiquetaNum_(copia.o) + ')' : '') + ': ' + corta_(r.asunto, 120));
-      if (r.turnado_usuario) bitacora_(yo.usuario, 'turno', r.id, textoTurno_('', r.turnado_usuario));
+      if (r.turnado_usuario) {
+        bitacora_(yo.usuario, 'turno', r.id, textoTurno_('', r.turnado_usuario));
+        avisarTurno_(yo, r.turnado_usuario, [r]);
+      }
     } else {
       var f = buscarRegistro_(t, d.id);
       r = f.o;
@@ -754,7 +739,10 @@ function guardar_(yo, d) {
       r.version = Number(r.version) + 1;
       escribirFila_(t.sh, HOJAS.REG, f.fila, r);
       if (cambios.length) bitacora_(yo.usuario, 'edición', r.id, cambios.join(' · '));
-      if (cambioTurno) bitacora_(yo.usuario, 'turno', r.id, textoTurno_(turnoAntes, turnoNuevo));
+      if (cambioTurno) {
+        bitacora_(yo.usuario, 'turno', r.id, textoTurno_(turnoAntes, turnoNuevo));
+        if (turnoNuevo) avisarTurno_(yo, turnoNuevo, [r]);
+      }
     }
     // "Responder": deja el original como Atendido
     if (nuevo && d.marcarAtendido && r.relacionado_id) {
@@ -885,8 +873,7 @@ function etiquetaNum_(r) {
 function cancelar_(yo, d) {
   var motivo = String(d.motivo || '').trim();
   if (motivo.length < 5) throw falla_('DATOS', 'Escribe el motivo de la cancelación.');
-  var lock = LockService.getScriptLock();
-  lock.waitLock(20000);
+  var lock = candado_(20000);
   try {
     var t = tabla_(HOJAS.REG);
     var f = buscarRegistro_(t, d.id);
@@ -906,18 +893,19 @@ function cancelar_(yo, d) {
 
 function pendientes_(yo) {
   var anio = Number(Utilities.formatDate(new Date(), ZONA, 'yyyy'));
+  var cfg = config_(), corte = fechaValida_(String(cfg.acuse_desde || '')) ? cfg.acuse_desde : '';
   var porAtender = [], sinAcuse = [];
-  tabla_(HOJAS.REG).filas.forEach(function (f) {
+  tablaLectura_(HOJAS.REG).filas.forEach(function (f) {
     var r = f.o;
     if (yo.tipos.indexOf(r.tipo) < 0) return;
     if (r.estatus === 'Pendiente' || r.estatus === 'En trámite') porAtender.push(resumen_(r));
-    else if (r.tipo === 'OFS' && r.acuse !== 'SI' && r.estatus !== 'Cancelado' && Number(r.anio) >= anio - 1) sinAcuse.push(resumen_(r));
+    else if (cuentaSinAcuse_(r, corte) && Number(r.anio) >= anio - 1) sinAcuse.push(resumen_(r));
   });
   porAtender.sort(function (a, b) {
     return (a.fecha_limite || '9999') < (b.fecha_limite || '9999') ? -1 : (a.fecha_limite || '9999') > (b.fecha_limite || '9999') ? 1 : 0;
   });
   sinAcuse.sort(function (a, b) { return (a.fecha || '') < (b.fecha || '') ? -1 : 1; });
-  return { porAtender: porAtender, sinAcuse: sinAcuse };
+  return { porAtender: porAtender, sinAcuse: sinAcuse, acuseDesde: corte };
 }
 
 /* ─────────── Varios destinatarios: el mismo oficio a varias personas ─────────── */
@@ -971,10 +959,10 @@ function guardarVarios_(yo, d) {
     return { cuantos: n, consecutivoDesde: max + 1, desde: numeroOficial_(tipo, max + 1, '', anio), hasta: numeroOficial_(tipo, max + n, '', anio),
       numeros: limpios.map(function (l, i) { return { numero: numeroOficial_(tipo, max + 1 + i, '', anio), consecutivo: max + 1 + i, dirigido_a: l.dirigido_a }; }) };
   };
-  if (d.previa) return rango(maxConsecutivo_(tabla_(HOJAS.REG), tipo, anio));
+  if (d.previa) return rango(maxConsecutivo_(tablaLectura_(HOJAS.REG), tipo, anio));
 
-  var lock = LockService.getScriptLock();
-  if (!lock.tryLock(30000)) throw falla_('OCUPADO', 'El sistema está ocupado guardando otros registros. Espera unos segundos e intenta de nuevo.');
+  var lock = candado_(30000, true);
+  if (!lock) throw falla_('OCUPADO', 'El sistema está ocupado guardando otros registros. Espera unos segundos e intenta de nuevo.');
   try {
     var t = tabla_(HOJAS.REG);
     var max = maxConsecutivo_(t, tipo, anio);
@@ -999,11 +987,110 @@ function guardarVarios_(yo, d) {
     entradas.push([yo.usuario, 'alta múltiple', '', n + ' ' + (n === 1 ? TIPOS[tipo].singular.toLowerCase() : TIPOS[tipo].nombre.toLowerCase()) +
       ' con el mismo asunto: del ' + (primero.numero || etiquetaNum_(primero)) + ' al ' + (ultimo.numero || etiquetaNum_(ultimo)) + ' · ' + corta_(primero.asunto, 120)]);
     bitacoraVarias_(entradas);
+    if (base.turnado_usuario) avisarTurno_(yo, base.turnado_usuario, nuevos);
     return { cuantos: n, desde: primero.numero, hasta: ultimo.numero, consecutivoDesde: primero.consecutivo,
       registros: nuevos.map(function (r) { return resumen_(r); }) };
   } finally {
     soltar_(lock);
   }
+}
+
+/* ─────────── Acciones en lote (1.7.0) ───────────
+   Cambiar a la vez estatus, acuse, turno o fecha límite de muchos registros
+   (por ejemplo, poner «Concluido» a los entrantes viejos de la migración o
+   marcar el acuse de los oficios que ya lo tienen en papel). Solo toca esos
+   campos: se lee la hoja dentro del candado y lo demás de cada registro se
+   queda igual. Los cancelados no se tocan. Cada registro queda en la
+   Bitácora («en lote») y además un resumen. */
+
+var MAX_LOTE = 500;
+
+function guardarLote_(yo, d) {
+  var ids = Array.isArray(d.ids) ? d.ids.map(String).filter(function (x, i, a) { return x && a.indexOf(x) === i; }) : [];
+  if (!ids.length) throw falla_('DATOS', 'No elegiste registros.');
+  if (ids.length > MAX_LOTE) throw falla_('DATOS', 'Son ' + ids.length + ' registros; el máximo por vez es ' + MAX_LOTE + '.');
+  var c = d.cambios && typeof d.cambios === 'object' ? d.cambios : {};
+  var cambios = {};
+  if (c.estatus !== undefined) {
+    var est = String(c.estatus);
+    if (est === 'Cancelado') throw falla_('DATOS', 'Para cancelar hay que escribir el motivo de cada registro: hazlo uno por uno.');
+    if (est && ESTATUS.indexOf(est) < 0) throw falla_('DATOS', 'Estatus desconocido.');
+    cambios.estatus = est;
+  }
+  if (c.acuse !== undefined) cambios.acuse = c.acuse === true || c.acuse === 'SI' ? 'SI' : 'NO';
+  if (c.fecha_limite !== undefined) {
+    var fl = String(c.fecha_limite || '');
+    if (fl && !fechaValida_(fl)) throw falla_('DATOS', 'La fecha límite no es válida.');
+    cambios.fecha_limite = fl;
+  }
+  if (c.turnado_usuario !== undefined) {
+    var tu = String(c.turnado_usuario || '').trim().toLowerCase();
+    if (tu && !/^[a-z0-9][a-z0-9._-]{2,29}$/.test(tu)) throw falla_('DATOS', 'Usuario para turnar inválido.');
+    cambios.turnado_usuario = tu;
+  }
+  var campos = Object.keys(cambios);
+  if (!campos.length) throw falla_('DATOS', 'No dijiste qué cambiar.');
+  var res = { cambiados: 0, sinCambio: 0, omitidos: [], registros: [] };
+  var turnadosA = {};
+  var lock = candado_(30000);
+  try {
+    var t = tabla_(HOJAS.REG), ahora = sello_(new Date());
+    var porId = {};
+    t.filas.forEach(function (f) { porId[f.o.id] = f; });
+    var turnoValido = {};   // tipo → ¿se puede turnar a esa persona en esa libreta?
+    var tocadas = [], entradas = [];
+    ids.forEach(function (id) {
+      var f = porId[id];
+      if (!f) { res.omitidos.push({ id: id, motivo: 'no existe' }); return; }
+      var r = f.o;
+      if (yo.tipos.indexOf(r.tipo) < 0) { res.omitidos.push({ id: id, motivo: 'sin acceso a ' + TIPOS[r.tipo].nombre }); return; }
+      if (r.estatus === 'Cancelado') { res.omitidos.push({ id: id, motivo: 'cancelado', num: etiquetaNum_(r) }); return; }
+      var propios = {};
+      TIPOS[r.tipo].campos.forEach(function (x) { propios[x[0]] = true; });
+      if ('acuse' in cambios && !propios.acuse && campos.length === 1) { res.omitidos.push({ id: id, motivo: TIPOS[r.tipo].nombre + ' no lleva acuse', num: etiquetaNum_(r) }); return; }
+      if (cambios.turnado_usuario && !(r.tipo in turnoValido)) {
+        try { validarTurno_(cambios.turnado_usuario, r.tipo); turnoValido[r.tipo] = true; } catch (e) { turnoValido[r.tipo] = e.message; }
+      }
+      if (cambios.turnado_usuario && turnoValido[r.tipo] !== true) { res.omitidos.push({ id: id, motivo: turnoValido[r.tipo], num: etiquetaNum_(r) }); return; }
+      var txt = [], estatusAntes = r.estatus, turnoAntes = r.turnado_usuario || '';
+      campos.forEach(function (k) {
+        if (k === 'acuse' && !propios.acuse) return;
+        var nuevo = cambios[k];
+        if (String(r[k] || '') === String(nuevo)) return;
+        if (k !== 'turnado_usuario') txt.push(k + ': «' + corta_(r[k], 60) + '» → «' + corta_(nuevo, 60) + '»');
+        r[k] = nuevo;
+      });
+      var cambioTurno = (r.turnado_usuario || '') !== turnoAntes;
+      // Al turnar algo sin estatus, queda «Pendiente» (igual que en el formulario)
+      if (cambioTurno && r.turnado_usuario && !r.estatus) { r.estatus = 'Pendiente'; txt.push('estatus: «» → «Pendiente»'); }
+      if (!txt.length && !cambioTurno) { res.sinCambio++; return; }
+      ajustarAtencion_(r, estatusAntes);
+      r.modificado_por = yo.usuario;
+      r.modificado_en = ahora;
+      r.version = Number(r.version) + 1;
+      tocadas.push(f);
+      if (txt.length) entradas.push([yo.usuario, 'edición', r.id, txt.join(' · ') + ' (en lote)']);
+      if (cambioTurno) {
+        entradas.push([yo.usuario, 'turno', r.id, textoTurno_(turnoAntes, r.turnado_usuario) + ' (en lote)']);
+        if (r.turnado_usuario) (turnadosA[r.turnado_usuario] = turnadosA[r.turnado_usuario] || []).push(r);
+      }
+      res.registros.push(resumen_(r));
+    });
+    res.cambiados = tocadas.length;
+    if (tocadas.length) {
+      escribirVarias_(t, HOJAS.REG, tocadas);
+      var que = campos.map(function (k) {
+        return { estatus: 'estatus «' + cambios.estatus + '»', acuse: 'acuse ' + (cambios.acuse === 'SI' ? 'sí' : 'no'),
+          fecha_limite: 'fecha límite ' + (cambios.fecha_limite || '(sin fecha)'), turnado_usuario: cambios.turnado_usuario ? 'turno a ' + cambios.turnado_usuario : 'sin turno' }[k];
+      }).join(', ');
+      entradas.push([yo.usuario, 'edición en lote', '', tocadas.length + ' registro(s): ' + que + (res.omitidos.length ? ' · ' + res.omitidos.length + ' omitido(s)' : '')]);
+      bitacoraVarias_(entradas);
+    }
+  } finally {
+    soltar_(lock);
+  }
+  Object.keys(turnadosA).forEach(function (u) { avisarTurno_(yo, u, turnadosA[u]); });
+  return res;
 }
 
 /* ─────────── Turnos a personas del sistema («Mis asuntos») ─────────── */
@@ -1036,7 +1123,7 @@ function usuariosTurno_(yo, d) {
 /** Lo turnado a mí, SOLO de las libretas que tengo (aunque me hayan turnado otras). */
 function misAsuntos_(yo) {
   var hoy = Utilities.formatDate(new Date(), ZONA, 'yyyy-MM-dd');
-  var lista = tabla_(HOJAS.REG).filas
+  var lista = tablaLectura_(HOJAS.REG).filas
     .filter(function (f) { return f.o.turnado_usuario === yo.usuario && yo.tipos.indexOf(f.o.tipo) >= 0 && f.o.estatus !== 'Cancelado'; })
     .map(function (f) { return resumen_(f.o); });
   var activo = function (r) { return r.estatus === 'Pendiente' || r.estatus === 'En trámite'; };
@@ -1070,7 +1157,7 @@ function exportar_(yo, d) {
     if (!(anio >= 2000 && anio <= 2100)) throw falla_('DATOS', 'Año inválido.');
   }
   var porTipo = {}, sinFecha = 0, filas = [];
-  tabla_(HOJAS.REG).filas.forEach(function (f) {
+  tablaLectura_(HOJAS.REG).filas.forEach(function (f) {
     var r = f.o;
     if (tipos.indexOf(r.tipo) < 0) return;
     if (anio && Number(r.anio) !== anio) return;
@@ -1105,7 +1192,7 @@ function buscar_(yo, d) {
   var palabras = q.split(' ').filter(Boolean).slice(0, 8);
   if (q.replace(/ /g, '').length < 2) throw falla_('DATOS', 'Escribe al menos 2 letras o números.');
   var hallados = [];
-  tabla_(HOJAS.REG).filas.forEach(function (f) {
+  tablaLectura_(HOJAS.REG).filas.forEach(function (f) {
     var r = f.o;
     if (yo.tipos.indexOf(r.tipo) < 0) return;   // solo libretas propias
     var texto = normalizar_([etiquetaNum_(r), r.numero, r.asunto, r.dirigido_a, r.firma, r.observaciones,
@@ -1152,8 +1239,7 @@ function guardarMantenimiento_(yo, d) {
   var msg = String(d.mensaje || '').replace(/[\u0000-\u001F]/g, ' ').replace(/\s+/g, ' ').trim();
   if (msg.length > 300) throw falla_('DATOS', 'El mensaje es muy largo (máximo 300 letras).');
   if (activo && msg.length < 5) throw falla_('DATOS', 'Escribe el mensaje que verá la gente (por ejemplo: «Estamos actualizando el sistema; regresa a las 3 de la tarde»).');
-  var lock = LockService.getScriptLock();
-  lock.waitLock(20000);
+  var lock = candado_(20000);
   try {
     var antes = mantenimiento_(config_());
     var t = tabla_(HOJAS.CFG);
@@ -1183,8 +1269,8 @@ function ping_() {
 /* ─────────── Respaldo descargable (Excel en el navegador) ─────────── */
 
 function respaldo_(yo) {
-  // Sin contraseñas ni sellos de sesión, y sin IDs de Drive (los escaneos se respaldan en Drive).
-  var quitar = { Registros: ['archivo_id', 'acuse_archivo_id'], Usuarios: ['clave', 'sello'] };
+  // Sin contraseñas, sellos de sesión ni secretos de dos pasos, y sin IDs de Drive (los escaneos se respaldan en Drive).
+  var quitar = { Registros: ['archivo_id', 'acuse_archivo_id'], Usuarios: ['clave', 'sello', 'totp'] };
   var hojas = {}, cuentas = [];
   [HOJAS.REG, HOJAS.DIR, HOJAS.USR, HOJAS.BIT, HOJAS.CFG].forEach(function (n) {
     var cols = COLS[n].filter(function (c) { return (quitar[n] || []).indexOf(c) < 0; });
@@ -1200,14 +1286,22 @@ function respaldo_(yo) {
 
 /* ─────────── Informes (con gráficas en la página) ─────────── */
 
-/** Días hábiles (lunes a viernes) de «a» a «b»: el mismo día = 0. No descuenta días festivos. */
-function diasHabiles_(a, b) {
+/**
+ * Días hábiles de «a» a «b» (el mismo día = 0): lunes a viernes, sin los días
+ * inhábiles de Configuración (festivos, vacaciones oficiales).
+ */
+function diasHabiles_(a, b, inhabiles) {
   if (!fechaValida_(a) || !fechaValida_(b)) return null;
   var d = function (s) { var p = s.split('-').map(Number); return Date.UTC(p[0], p[1] - 1, p[2]); };
   var ini = d(a), fin = d(b);
   if (fin < ini) return -1;
+  var fuera = {};
+  (inhabiles || diasInhabiles_()).forEach(function (x) { fuera[x] = true; });
   var n = 0;
-  for (var t = ini + 86400000; t <= fin; t += 86400000) { var w = new Date(t).getUTCDay(); if (w !== 0 && w !== 6) n++; }
+  for (var t = ini + 86400000; t <= fin; t += 86400000) {
+    var dt = new Date(t), w = dt.getUTCDay();
+    if (w !== 0 && w !== 6 && !fuera[dt.toISOString().slice(0, 10)]) n++;
+  }
   return n;
 }
 
@@ -1228,7 +1322,7 @@ function informes_(yo, d) {
   var tipos = ORDEN_TIPOS.filter(function (t) { return pedidos.indexOf(t) >= 0; });
   var enPeriodo = function (f) { return !!f && f >= desde && f <= hasta; };
   var fechaDe = function (r) { return String(r.fecha_recepcion || r.fecha || '').slice(0, 10); };
-  var propios = tabla_(HOJAS.REG).filas.map(function (f) { return f.o; })
+  var propios = tablaLectura_(HOJAS.REG).filas.map(function (f) { return f.o; })
     .filter(function (r) { return r.estatus !== 'Cancelado' && yo.tipos.indexOf(r.tipo) >= 0; });
   var sel = propios.filter(function (r) { return tipos.indexOf(r.tipo) >= 0; });
   var etiqueta = function (r) { return TIPOS[r.tipo].singular + ' ' + etiquetaNum_(r); };
@@ -1280,11 +1374,12 @@ function informes_(yo, d) {
     if (!prev || String(r.fecha) < String(prev.fecha)) respuesta[r.relacionado_id] = r;
   });
   var recibidos = delPeriodo.filter(function (r) { return TIPOS[r.tipo].recibido; });
+  var inhabiles = diasInhabiles_();
   var pares = [];
   recibidos.forEach(function (e) {
     var o = respuesta[e.id];
     if (!o) return;
-    var dias = diasHabiles_(fechaDe(e), String(o.fecha));
+    var dias = diasHabiles_(fechaDe(e), String(o.fecha), inhabiles);
     if (dias === null || dias < 0) return;
     pares.push({ recibido: etiqueta(e), numero: e.numero, asunto: corta_(e.asunto, 160), recepcion: fechaDe(e),
       respuesta: etiqueta(o), numero_respuesta: o.numero, fecha_respuesta: String(o.fecha), dias: dias });
@@ -1368,18 +1463,23 @@ function subirArchivo_(yo, d) {
     (mime === 'image/jpeg' && firma[0] === 0xff && firma[1] === 0xd8) ||
     (mime === 'image/png' && firma[0] === 0x89 && firma[1] === 0x50 && firma[2] === 0x4e && firma[3] === 0x47);
   if (!ok) throw falla_('DATOS', 'El contenido del archivo no corresponde a un PDF, JPG o PNG.');
-  var lock = LockService.getScriptLock();
-  lock.waitLock(20000);
+  // Primero se revisa y se crea el archivo en Drive (es lo lento) SIN el candado,
+  // para no detener a quien está guardando otra cosa mientras sube la foto.
+  var previo = registroPorId_(d.id);
+  puedeTipo_(yo, previo.tipo);
+  if (previo.estatus === 'Cancelado') throw falla_('DATOS', 'El registro está cancelado.');
+  var ext = { 'application/pdf': '.pdf', 'image/jpeg': '.jpg', 'image/png': '.png' }[mime];
+  var nombre = previo.tipo + ' ' + etiquetaNum_(previo).replace('/', '-') + ' ' + clase + ext;
+  var archivo = carpetaArchivos_().createFile(Utilities.newBlob(bytes, mime, nombre));
+  var campo = clase === 'acuse' ? 'acuse_archivo' : 'archivo';
+  var anterior = '', res, guardado = false;
+  var lock = candado_(20000);
   try {
     var t = tabla_(HOJAS.REG);
-    var f = buscarRegistro_(t, d.id);
+    var f = buscarRegistro_(t, d.id);   // otra vez, ya con el candado: pudo cambiar mientras subía
     puedeTipo_(yo, f.o.tipo);
     if (f.o.estatus === 'Cancelado') throw falla_('DATOS', 'El registro está cancelado.');
-    var ext = { 'application/pdf': '.pdf', 'image/jpeg': '.jpg', 'image/png': '.png' }[mime];
-    var nombre = f.o.tipo + ' ' + etiquetaNum_(f.o).replace('/', '-') + ' ' + clase + ext;
-    var archivo = carpetaArchivos_().createFile(Utilities.newBlob(bytes, mime, nombre));
-    var campo = clase === 'acuse' ? 'acuse_archivo' : 'archivo';
-    var anterior = f.o[campo + '_id'];
+    anterior = f.o[campo + '_id'];
     f.o[campo + '_id'] = archivo.getId();
     f.o[campo + '_nombre'] = corta_(String(d.nombre || nombre).replace(/[\\/:*?"<>|]/g, '_'), 120);
     if (clase === 'acuse') f.o.acuse = 'SI';
@@ -1387,21 +1487,43 @@ function subirArchivo_(yo, d) {
     f.o.modificado_en = sello_(new Date());
     f.o.version = Number(f.o.version) + 1;
     escribirFila_(t.sh, HOJAS.REG, f.fila, f.o);
-    if (anterior) { try { DriveApp.getFileById(anterior).setTrashed(true); } catch (e) { /* ya no estaba */ } }
     bitacora_(yo.usuario, 'archivo', f.o.id, (anterior ? 'Reemplazó ' : 'Subió ') + (clase === 'acuse' ? 'el acuse' : 'el documento') + ': ' + f.o[campo + '_nombre']);
-    return { registro: publico_(f.o) };
+    res = { registro: publico_(f.o) };
+    guardado = true;
   } finally {
     soltar_(lock);
+    if (!guardado) { try { archivo.setTrashed(true); } catch (e0) { /* se queda en la carpeta */ } }
   }
+  if (anterior) { try { DriveApp.getFileById(anterior).setTrashed(true); } catch (e) { /* ya no estaba */ } }
+  return res;
+}
+
+/**
+ * Un solo registro, leído directo de la hoja (sin la caché ni la tabla
+ * completa): busca el ID en la primera columna y lee solo ese renglón.
+ */
+function registroPorId_(id) {
+  id = String(id || '');
+  if (!/^[A-Za-z0-9_-]{1,60}$/.test(id)) throw falla_('NO_EXISTE', 'Ese registro no existe.');
+  var sh = hoja_(HOJAS.REG), cols = COLS[HOJAS.REG];
+  revisarEncabezados_(sh, HOJAS.REG);
+  var n = sh.getLastRow();
+  if (n < 2) throw falla_('NO_EXISTE', 'Ese registro no existe.');
+  var hall = sh.getRange(2, 1, n - 1, 1).createTextFinder(id).matchCase(true).matchEntireCell(true).findAll();
+  if (!hall.length) throw falla_('NO_EXISTE', 'Ese registro no existe.');
+  var v = sh.getRange(hall[0].getRow(), 1, 1, cols.length).getValues()[0];
+  var num = NUMERICAS[HOJAS.REG] || {}, o = {};
+  for (var c = 0; c < cols.length; c++) o[cols[c]] = leerValor_(v[c], num[cols[c]]);
+  if (o.id !== id) throw falla_('NO_EXISTE', 'Ese registro no existe.');
+  return o;
 }
 
 function descargarArchivo_(yo, d) {
   var clase = d.clase === 'acuse' ? 'acuse' : 'oficio';
-  var t = tabla_(HOJAS.REG);
-  var f = buscarRegistro_(t, d.id);
-  puedeTipo_(yo, f.o.tipo);
+  var r = registroPorId_(d.id);
+  puedeTipo_(yo, r.tipo);
   var campo = clase === 'acuse' ? 'acuse_archivo' : 'archivo';
-  var id = f.o[campo + '_id'];
+  var id = r[campo + '_id'];
   if (!id) throw falla_('NO_EXISTE', 'Este registro no tiene ese archivo.');
   var archivo = DriveApp.getFileById(id);
   // Defensa extra: solo se entregan archivos de la carpeta del sistema
@@ -1409,23 +1531,22 @@ function descargarArchivo_(yo, d) {
   while (padres.hasNext()) if (padres.next().getId() === carpeta) propio = true;
   if (!propio || archivo.isTrashed()) throw falla_('NO_EXISTE', 'El archivo ya no está disponible.');
   var blob = archivo.getBlob();
-  bitacora_(yo.usuario, 'descarga', f.o.id, (clase === 'acuse' ? 'Acuse' : 'Documento') + ': ' + f.o[campo + '_nombre']);
-  return { nombre: f.o[campo + '_nombre'] || archivo.getName(), mime: blob.getContentType(), base64: Utilities.base64Encode(blob.getBytes()) };
+  bitacora_(yo.usuario, 'descarga', r.id, (clase === 'acuse' ? 'Acuse' : 'Documento') + ': ' + r[campo + '_nombre']);
+  return { nombre: r[campo + '_nombre'] || archivo.getName(), mime: blob.getContentType(), base64: Utilities.base64Encode(blob.getBytes()) };
 }
 
 function quitarArchivo_(yo, d) {
   var clase = d.clase === 'acuse' ? 'acuse' : 'oficio';
-  var lock = LockService.getScriptLock();
-  lock.waitLock(20000);
+  var id = '', res;
+  var lock = candado_(20000);
   try {
     var t = tabla_(HOJAS.REG);
     var f = buscarRegistro_(t, d.id);
     puedeTipo_(yo, f.o.tipo);
     if (f.o.estatus === 'Cancelado' && yo.rol !== 'admin') throw falla_('PERMISO', 'El registro está cancelado.');
     var campo = clase === 'acuse' ? 'acuse_archivo' : 'archivo';
-    var id = f.o[campo + '_id'];
+    id = f.o[campo + '_id'];
     if (!id) return { registro: publico_(f.o) };
-    try { DriveApp.getFileById(id).setTrashed(true); } catch (e) { /* ya no estaba */ }
     var nombre = f.o[campo + '_nombre'];
     f.o[campo + '_id'] = '';
     f.o[campo + '_nombre'] = '';
@@ -1434,17 +1555,20 @@ function quitarArchivo_(yo, d) {
     f.o.version = Number(f.o.version) + 1;
     escribirFila_(t.sh, HOJAS.REG, f.fila, f.o);
     bitacora_(yo.usuario, 'archivo', f.o.id, 'Quitó ' + (clase === 'acuse' ? 'el acuse' : 'el documento') + ': ' + nombre + ' (queda en la papelera de Drive 30 días)');
-    return { registro: publico_(f.o) };
+    res = { registro: publico_(f.o) };
   } finally {
     soltar_(lock);
   }
+  // A la papelera ya sin el candado (Drive tarda)
+  try { DriveApp.getFileById(id).setTrashed(true); } catch (e) { /* ya no estaba */ }
+  return res;
 }
 
 /* ═══════════════════════════ Directorio ═══════════════════════════════ */
 
 function listarDirectorio_(yo) {
   var usos = {};
-  tabla_(HOJAS.REG).filas.forEach(function (f) {
+  tablaLectura_(HOJAS.REG).filas.forEach(function (f) {
     if (f.o.dirigido_id) usos[f.o.dirigido_id] = (usos[f.o.dirigido_id] || 0) + 1;
     if (f.o.firma_id && f.o.firma_id !== f.o.dirigido_id) usos[f.o.firma_id] = (usos[f.o.firma_id] || 0) + 1;
   });
@@ -1480,8 +1604,7 @@ function guardarPersona_(yo, d) {
   var dependencia = String(d.dependencia || '').replace(/\s+/g, ' ').trim();
   if (nombre.length < 3) throw falla_('DATOS', 'Escribe el nombre.');
   if (nombre.length > 200 || cargo.length > 300 || dependencia.length > 200) throw falla_('DATOS', 'Algún dato es demasiado largo.');
-  var lock = LockService.getScriptLock();
-  lock.waitLock(20000);
+  var lock = candado_(20000);
   try {
     var t = tabla_(HOJAS.DIR);
     var ahora = sello_(new Date());
@@ -1518,8 +1641,7 @@ function guardarPersona_(yo, d) {
 /** Junta dos fichas de la misma persona: los registros de «de» pasan a «a». */
 function unirPersonas_(yo, d) {
   if (!d.de || !d.a || d.de === d.a) throw falla_('DATOS', 'Elige dos personas distintas.');
-  var lock = LockService.getScriptLock();
-  lock.waitLock(30000);
+  var lock = candado_(30000);
   try {
     var td = tabla_(HOJAS.DIR);
     var de = td.filas.filter(function (x) { return x.o.id === d.de; })[0];
@@ -1562,7 +1684,8 @@ function listarUsuarios_() {
     var o = f.o;
     return { usuario: o.usuario, nombre: o.nombre, rol: o.rol, tipos: o.tipos, activo: o.activo,
       debe_cambiar: o.debe_cambiar, bloqueado: !!(o.bloqueado_hasta && new Date(o.bloqueado_hasta) > ahora),
-      creado_en: o.creado_en, ultimo_acceso: o.ultimo_acceso, informes: o.rol === 'admin' ? 'SI' : (o.informes === 'SI' ? 'SI' : 'NO') };
+      creado_en: o.creado_en, ultimo_acceso: o.ultimo_acceso, informes: o.rol === 'admin' ? 'SI' : (o.informes === 'SI' ? 'SI' : 'NO'),
+      correo: o.correo || '', dosPasos: !!o.totp };
   });
 }
 
@@ -1578,8 +1701,13 @@ function guardarUsuario_(yo, d) {
   // Informes: los admin siempre; para los demás, solo si se marca. undefined = la
   // página (versión anterior) no lo manda: al editar se conserva lo que ya tenía.
   var informes = d.informes === undefined || d.informes === null ? undefined : (d.informes === true || d.informes === 'SI' ? 'SI' : 'NO');
-  var lock = LockService.getScriptLock();
-  lock.waitLock(20000);
+  // Correo para avisos: undefined = página anterior (se conserva).
+  var correo = d.correo === undefined || d.correo === null ? undefined : String(d.correo).trim().toLowerCase();
+  if (correo !== undefined && !correoValido_(correo)) throw falla_('DATOS', 'Ese correo no parece válido.');
+  // La contraseña temporal se cifra antes de tomar el candado (tarda).
+  var temporal = d.nuevo ? claveTemporal_() : '';
+  var hash = d.nuevo ? hashClave_(temporal) : '';
+  var lock = candado_(20000);
   try {
     var t = tabla_(HOJAS.USR);
     var ahora = sello_(new Date());
@@ -1587,10 +1715,9 @@ function guardarUsuario_(yo, d) {
       var usuario = String(d.usuario || '').trim().toLowerCase();
       if (!/^[a-z0-9][a-z0-9._-]{2,29}$/.test(usuario)) throw falla_('DATOS', 'El usuario debe tener de 3 a 30 letras minúsculas, números, punto o guion, sin espacios ni acentos.');
       if (t.filas.some(function (f) { return f.o.usuario === usuario; })) throw falla_('DATOS', 'Ese usuario ya existe.');
-      var temporal = claveTemporal_();
-      var u = { usuario: usuario, nombre: nombre, rol: rol, tipos: tipos, activo: activo, clave: hashClave_(temporal),
+      var u = { usuario: usuario, nombre: nombre, rol: rol, tipos: tipos, activo: activo, clave: hash,
         debe_cambiar: 'SI', intentos: 0, bloqueado_hasta: '', sello: nuevoSello_(), creado_en: ahora, ultimo_acceso: '',
-        informes: rol !== 'admin' && informes === 'SI' ? 'SI' : '' };
+        informes: rol !== 'admin' && informes === 'SI' ? 'SI' : '', correo: correo || '', totp: '' };
       escribirFila_(t.sh, HOJAS.USR, t.sh.getLastRow() + 1, u);
       bitacora_(yo.usuario, 'usuarios', '', 'Alta de ' + usuario + ' (' + ROLES[rol] + ', ' + tipos + (u.informes === 'SI' ? ', con Informes' : '') + ')');
       return { usuario: usuario, temporal: temporal };
@@ -1606,12 +1733,17 @@ function guardarUsuario_(yo, d) {
     var informesNuevo = rol === 'admin' ? '' : (informes === undefined ? (f.o.informes === 'SI' ? 'SI' : '') : (informes === 'SI' ? 'SI' : ''));
     var txtInf = function (v) { return v === 'SI' ? '/informes' : ''; };
     var antes = f.o.rol + '/' + f.o.tipos + '/' + f.o.activo + txtInf(f.o.informes);
-    var cerrar = f.o.activo !== activo || f.o.rol !== rol || f.o.tipos !== tipos || (f.o.informes || '') !== informesNuevo;
+    var quitar2fa = !!(d.quitar2fa && f.o.totp);
+    var cerrar = f.o.activo !== activo || f.o.rol !== rol || f.o.tipos !== tipos || (f.o.informes || '') !== informesNuevo || quitar2fa;
+    var extra = [];
     f.o.nombre = nombre; f.o.rol = rol; f.o.tipos = tipos; f.o.activo = activo; f.o.informes = informesNuevo;
-    if (d.desbloquear) { f.o.bloqueado_hasta = ''; f.o.intentos = 0; }
+    if (correo !== undefined && correo !== (f.o.correo || '')) { extra.push('correo «' + (f.o.correo || '') + '» → «' + correo + '»'); f.o.correo = correo; }
+    if (d.desbloquear) { f.o.bloqueado_hasta = ''; f.o.intentos = 0; CacheService.getScriptCache().remove('bloq:' + f.o.usuario); extra.push('desbloqueado'); }
+    if (quitar2fa) { f.o.totp = ''; extra.push('le quitó la verificación en dos pasos'); }
     if (cerrar) f.o.sello = nuevoSello_();   // permisos nuevos = sesión nueva
     escribirFila_(t.sh, HOJAS.USR, f.fila, f.o);
-    bitacora_(yo.usuario, 'usuarios', '', 'Cambió ' + f.o.usuario + ': ' + antes + ' → ' + rol + '/' + tipos + '/' + activo + txtInf(informesNuevo) + (d.desbloquear ? ' (desbloqueado)' : ''));
+    bitacora_(yo.usuario, 'usuarios', '', 'Cambió ' + f.o.usuario + ': ' + antes + ' → ' + rol + '/' + tipos + '/' + activo + txtInf(informesNuevo) +
+      (extra.length ? ' (' + extra.join(', ') + ')' : ''));
     return { usuario: f.o.usuario };
   } finally {
     soltar_(lock);
@@ -1619,89 +1751,167 @@ function guardarUsuario_(yo, d) {
 }
 
 function restablecerClave_(yo, d) {
-  var t = tabla_(HOJAS.USR);
-  var f = t.filas.filter(function (x) { return x.o.usuario === d.usuario; })[0];
-  if (!f) throw falla_('NO_EXISTE', 'Ese usuario no existe.');
   var temporal = claveTemporal_();
-  f.o.clave = hashClave_(temporal);
-  f.o.debe_cambiar = 'SI';
-  f.o.intentos = 0;
-  f.o.bloqueado_hasta = '';
-  f.o.sello = nuevoSello_();
-  escribirFila_(t.sh, HOJAS.USR, f.fila, f.o);
-  bitacora_(yo.usuario, 'usuarios', '', 'Restableció la contraseña de ' + f.o.usuario);
-  return { usuario: f.o.usuario, temporal: temporal };
+  var hash = hashClave_(temporal);   // fuera del candado (tarda)
+  var lock = candado_(20000);
+  try {
+    var t = tabla_(HOJAS.USR);
+    var f = t.filas.filter(function (x) { return x.o.usuario === d.usuario; })[0];
+    if (!f) throw falla_('NO_EXISTE', 'Ese usuario no existe.');
+    f.o.clave = hash;
+    f.o.debe_cambiar = 'SI';
+    f.o.intentos = 0;
+    f.o.bloqueado_hasta = '';
+    f.o.sello = nuevoSello_();
+    escribirFila_(t.sh, HOJAS.USR, f.fila, f.o);
+    CacheService.getScriptCache().remove('bloq:' + f.o.usuario);
+    bitacora_(yo.usuario, 'usuarios', '', 'Restableció la contraseña de ' + f.o.usuario);
+    return { usuario: f.o.usuario, temporal: temporal };
+  } finally {
+    soltar_(lock);
+  }
 }
 
 /* ═══════════════════════════ Bitácora y configuración ═════════════════ */
 
 function bitacora_(usuario, accion, registroId, detalle) {
-  var sh = hoja_(HOJAS.BIT);
-  var fila = [sello_(new Date()), usuario, accion, registroId || '', corta_(detalle, 2000)].map(seguro_);
-  var n = sh.getLastRow() + 1;
-  asegurarFilas_(sh, n);
-  var rng = sh.getRange(n, 1, 1, fila.length);
-  rng.setNumberFormat('@');
-  rng.setValues([fila]);
+  bitacoraVarias_([[usuario, accion, registroId, detalle]]);
 }
 
-/** Varias entradas de bitácora en UNA sola escritura. entradas = [[usuario, accion, registroId, detalle], …] */
+/**
+ * Varias entradas de bitácora en UNA sola escritura. entradas = [[usuario, accion, registroId, detalle], …]
+ * Siempre dentro del candado: si dos peticiones calcularan el mismo «último
+ * renglón + 1», una borraría a la otra. Si quien llama ya tiene el candado,
+ * se usa ese; si no, se toma aquí (máximo 15 s). Si ni así, appendRow (una
+ * sola operación de Google, que no pisa renglones).
+ */
 function bitacoraVarias_(entradas) {
   if (!entradas.length) return;
-  var sh = hoja_(HOJAS.BIT);
   var cuando = sello_(new Date());
   var filas = entradas.map(function (e) { return [cuando, e[0], e[1], e[2] || '', corta_(e[3], 2000)].map(seguro_); });
-  var n = sh.getLastRow() + 1;
-  asegurarFilas_(sh, n + filas.length - 1);
-  var rng = sh.getRange(n, 1, filas.length, 5);
-  rng.setNumberFormat('@');
-  rng.setValues(filas);
+  var propio = enCandado_() ? null : candado_(15000, true);
+  try {
+    var sh = hoja_(HOJAS.BIT);
+    if (!enCandado_()) {
+      console.warn('bitácora sin candado (ocupado): se usa appendRow');
+      filas.forEach(function (f) { sh.appendRow(f); });
+      return;
+    }
+    var n = sh.getLastRow() + 1;
+    asegurarFilas_(sh, n + filas.length - 1);
+    var rng = sh.getRange(n, 1, filas.length, 5);
+    rng.setNumberFormat('@');
+    rng.setValues(filas);
+  } finally {
+    if (propio) soltar_(propio);
+  }
 }
+
+/**
+ * La Bitácora del administrador. Crece todos los días, así que se lee desde
+ * el final hacia atrás, en bloques: sin «desde», los últimos 20,000
+ * movimientos; con «desde», hasta llegar a esa fecha.
+ */
+var BIT_BLOQUE = 2000, BIT_TOPE = 20000;
 
 function listarBitacora_(yo, d) {
   var desde = String(d.desde || ''), hasta = String(d.hasta || '');
   var usuario = String(d.usuario || ''), accion = String(d.accion || '');
   var q = String(d.texto || '').toLowerCase();
-  var todas = tabla_(HOJAS.BIT).filas;
-  var filas = todas.map(function (f) { return f.o; }).filter(function (o) {
+  var sh = hoja_(HOJAS.BIT), cols = COLS[HOJAS.BIT];
+  revisarEncabezados_(sh, HOJAS.BIT);
+  var leidas = [], fin = sh.getLastRow();
+  while (fin >= 2) {
+    var ini = Math.max(2, fin - BIT_BLOQUE + 1);
+    var v = sh.getRange(ini, 1, fin - ini + 1, cols.length).getValues();
+    for (var i = v.length - 1; i >= 0; i--) {
+      if (v[i].every(function (x) { return x === '' || x === null; })) continue;
+      var o = {};
+      for (var c = 0; c < cols.length; c++) o[cols[c]] = leerValor_(v[i][c], false);
+      leidas.push(o);
+    }
+    fin = ini - 1;
+    var masVieja = leidas.length ? String(leidas[leidas.length - 1].fecha).slice(0, 10) : '';
+    if (desde ? masVieja && masVieja < desde : leidas.length >= BIT_TOPE) break;
+  }
+  var filas = leidas.filter(function (o) {
     var dia = String(o.fecha).slice(0, 10);
     return (!desde || dia >= desde) && (!hasta || dia <= hasta) && (!usuario || o.usuario === usuario) &&
       (!accion || o.accion === accion) && (!q || (o.detalle + ' ' + o.registro_id).toLowerCase().indexOf(q) >= 0);
   });
   var usuarios = {}, acciones = {};
-  todas.forEach(function (f) { usuarios[f.o.usuario] = true; acciones[f.o.accion] = true; });
-  return { filas: filas.reverse().slice(0, 500), total: filas.length, usuarios: Object.keys(usuarios).sort(), acciones: Object.keys(acciones).sort() };
+  leidas.forEach(function (o) { usuarios[o.usuario] = true; acciones[o.accion] = true; });
+  return { filas: filas.slice(0, 500), total: filas.length, usuarios: Object.keys(usuarios).sort(), acciones: Object.keys(acciones).sort(),
+    revisados: leidas.length, parcial: fin >= 2 };
 }
 
+/** Lo de la pestaña Config. Se lee una vez por petición (y otra vez si se escribe en Config o se toma el candado). */
 function config_() {
+  if (MEMO_.cfg) return MEMO_.cfg;
   var o = {};
   tabla_(HOJAS.CFG).filas.forEach(function (f) { o[f.o.clave] = f.o.valor; });
+  MEMO_.cfg = o;
   return o;
 }
 
-var CONFIG_EDITABLE = ['encabezado_1', 'encabezado_2', 'encabezado_3', 'plantilla_OFS', 'plazo_dias', 'url_web'];
+var CONFIG_EDITABLE = ['encabezado_1', 'encabezado_2', 'encabezado_3', 'plantilla_OFS', 'plazo_dias', 'url_web',
+  // 1.7.0
+  'dias_inhabiles', 'acuse_desde', 'plantilla_doc_OFS', 'avisos_correo', 'avisos_detalle', 'dos_pasos_admin'];
+var CONFIG_SI_NO = { avisos_correo: true, avisos_detalle: true, dos_pasos_admin: true };
+
+/** Limpia y valida un valor de Configuración. Devuelve el texto que se guarda. */
+function valorConfig_(k, bruto, yo) {
+  if (k === 'dias_inhabiles') {
+    var fechas = (String(bruto).match(/\d{4}-\d{2}-\d{2}/g) || []);
+    var malas = fechas.filter(function (x) { return !fechaValida_(x); });
+    if (malas.length) throw falla_('DATOS', 'Estas fechas no existen: ' + malas.slice(0, 5).join(', ') + '.');
+    var unicas = {};
+    fechas.forEach(function (x) { unicas[x] = true; });
+    var lista = Object.keys(unicas).sort();
+    if (lista.length > 400) throw falla_('DATOS', 'Son demasiados días inhábiles (máximo 400).');
+    return lista.join(', ');
+  }
+  var v = String(bruto).replace(/\s+/g, ' ').trim().slice(0, 200);
+  if (k === 'plantilla_OFS' && v && v.indexOf('{NNN}') < 0) throw falla_('DATOS', 'La plantilla debe incluir {NNN} (el consecutivo).');
+  if (k === 'plazo_dias' && v && !/^\d{1,3}$/.test(v)) throw falla_('DATOS', 'El plazo debe ser un número de días.');
+  if (k === 'url_web' && v && !/^https:\/\/[a-z0-9.-]+(:\d+)?(\/[^\s"'<>]*)?$/i.test(v)) throw falla_('DATOS', 'La dirección debe empezar con https:// (por ejemplo https://control-gestion.vercel.app).');
+  if (k === 'acuse_desde' && v && !fechaValida_(v)) throw falla_('DATOS', 'La fecha de corte para «sin acuse» no es válida.');
+  if (CONFIG_SI_NO[k]) v = v === 'SI' ? 'SI' : 'NO';
+  if (k === 'dos_pasos_admin' && v === 'SI' && !yo.dosPasos) throw falla_('DATOS', 'Primero activa tu propia verificación en dos pasos (en «Mi cuenta»); si no, el sistema te la pediría al guardar.');
+  if (k === 'plantilla_doc_OFS' && v) {
+    var m = v.match(/[-\w]{25,}/);
+    if (!m) throw falla_('DATOS', 'Pega el enlace o el ID del documento de Google que sirve de plantilla.');
+    v = m[0];
+    revisarPlantillaDoc_(v);
+  }
+  return v;
+}
 
 function guardarConfig_(yo, d) {
-  var t = tabla_(HOJAS.CFG);
-  var cambios = [];
-  CONFIG_EDITABLE.forEach(function (k) {
-    if (d[k] === undefined) return;
-    var v = String(d[k]).replace(/\s+/g, ' ').trim().slice(0, 200);
-    if (k === 'plantilla_OFS' && v && v.indexOf('{NNN}') < 0) throw falla_('DATOS', 'La plantilla debe incluir {NNN} (el consecutivo).');
-    if (k === 'plazo_dias' && v && !/^\d{1,3}$/.test(v)) throw falla_('DATOS', 'El plazo debe ser un número de días.');
-    if (k === 'url_web' && v && !/^https:\/\/[a-z0-9.-]+(:\d+)?(\/[^\s"'<>]*)?$/i.test(v)) throw falla_('DATOS', 'La dirección debe empezar con https:// (por ejemplo https://control-gestion.vercel.app).');
-    var f = t.filas.filter(function (x) { return x.o.clave === k; })[0];
-    if (f && f.o.valor !== v) {
-      cambios.push(k + ': «' + f.o.valor + '» → «' + v + '»');
-      f.o.valor = v;
-      escribirFila_(t.sh, HOJAS.CFG, f.fila, f.o);
-    } else if (!f) {
-      cambios.push(k + ': «' + v + '»');
-      escribirFila_(t.sh, HOJAS.CFG, t.sh.getLastRow() + 1, { clave: k, valor: v, descripcion: '' });
-    }
-  });
-  if (cambios.length) bitacora_(yo.usuario, 'configuración', '', cambios.join(' · '));
-  return config_();
+  var limpios = {};
+  CONFIG_EDITABLE.forEach(function (k) { if (d[k] !== undefined && d[k] !== null) limpios[k] = valorConfig_(k, d[k], yo); });
+  var lock = candado_(20000);
+  try {
+    var t = tabla_(HOJAS.CFG);
+    var cambios = [];
+    Object.keys(limpios).forEach(function (k) {
+      var v = limpios[k];
+      var f = t.filas.filter(function (x) { return x.o.clave === k; })[0];
+      if (f && f.o.valor !== v) {
+        cambios.push(k + ': «' + corta_(f.o.valor, 80) + '» → «' + corta_(v, 80) + '»');
+        f.o.valor = v;
+        escribirFila_(t.sh, HOJAS.CFG, f.fila, f.o);
+      } else if (!f) {
+        cambios.push(k + ': «' + corta_(v, 80) + '»');
+        escribirFila_(t.sh, HOJAS.CFG, t.sh.getLastRow() + 1, { clave: k, valor: v, descripcion: '' });
+        t = tabla_(HOJAS.CFG);
+      }
+    });
+    if (cambios.length) bitacora_(yo.usuario, 'configuración', '', cambios.join(' · '));
+  } finally {
+    soltar_(lock);
+  }
+  return configPublica_(config_(), yo);
 }
 
 /* ═══════════════════════════ Acceso a la hoja ═════════════════════════ */
@@ -1750,6 +1960,7 @@ function tabla_(nombre) {
       var cab = sh.getRange(1, c0 + 1, 1, faltan.length);
       cab.setNumberFormat('@');
       cab.setValues([faltan]);
+      marcarEscrito_(nombre);
       for (var k = 0; k < faltan.length; k++) todo[0][c0 + k] = faltan[k];
       console.warn('Se agregaron columnas a «' + nombre + '»: ' + faltan.join(', ') + '. Corre instalar() desde el editor.');
       if (nombre !== HOJAS.BIT) bitacora_('sistema', 'instalación', '', 'Columnas nuevas en «' + nombre + '»: ' + faltan.join(', ') + ' (agregadas solas; corre instalar() desde el editor).');
@@ -1758,6 +1969,7 @@ function tabla_(nombre) {
     throw falla_('INSTALACION', 'Las columnas de la pestaña «' + nombre + '» no son las esperadas (columna ' + (c0 + 1) +
       ' debería ser «' + cols[c0] + '»). No muevas columnas a mano; corre revisarSeguridad() desde el editor.');
   }
+  (MEMO_.encOk || (MEMO_.encOk = {}))[nombre] = true;
   var valores = todo.slice(1);
   var num = NUMERICAS[nombre] || {};
   var filas = [];
@@ -1770,6 +1982,138 @@ function tabla_(nombre) {
   }
   if (nombre === HOJAS.REG) MEMO_.filasReg = filas;   // la última lectura (la usa conDetalle_)
   return { sh: sh, filas: filas };
+}
+
+/**
+ * Revisa SOLO el renglón de títulos (una lectura chica). Si no coincide, tabla_()
+ * hace lo de siempre: agrega las columnas nuevas que falten o avisa que movieron columnas.
+ */
+function revisarEncabezados_(sh, nombre) {
+  var ok = MEMO_.encOk || (MEMO_.encOk = {});
+  if (ok[nombre]) return;
+  var cols = COLS[nombre];
+  if (sh.getMaxColumns() < cols.length) { tabla_(nombre); return; }
+  var cab = sh.getRange(1, 1, 1, cols.length).getValues()[0];
+  for (var c = 0; c < cols.length; c++) {
+    if (String(cab[c]).trim() !== cols[c]) { tabla_(nombre); return; }
+  }
+  ok[nombre] = true;
+}
+
+/* ─────────── Caché de Registros entre peticiones (1.7.0) ───────────
+   Leer la pestaña Registros completa en cada petición crece en línea recta
+   con los años. Lo que solo LEE (listas, portal, buscador, informes…) usa
+   una copia comprimida en CacheService. Reglas para que nunca se vea algo
+   viejo después de guardar:
+    · Lo que escribe siempre lee la hoja directo, dentro del candado.
+    · Al escribir, DESPUÉS del flush, se cambia la «versión» (reg:v); las
+      copias de versiones anteriores ya no se usan.
+    · Quien lee anota la versión ANTES de leer la hoja y guarda su copia con
+      esa versión; si alguien escribió mientras tanto, la versión ya cambió.
+    · Solo quien tiene el candado crea una versión cuando no hay ninguna.
+    · Todo dura máximo 15 min: si alguien edita la hoja a mano, se ve a más
+      tardar en ese tiempo (o al instante con instalar() / revisarSeguridad()).
+   Se apaga con la propiedad del script CACHE_REGISTROS = NO. */
+
+var CACHE_REG_SEG = 15 * 60;
+var CACHE_TROZO = 90000;      // CacheService guarda hasta 100 KB por clave
+
+function tablaLectura_(nombre) {
+  if (nombre !== HOJAS.REG || enCandado_()) return tabla_(nombre);
+  if (MEMO_.regLectura) return MEMO_.regLectura;
+  var t = null;
+  try { t = registrosDeCache_(); } catch (e) { console.warn('caché de Registros: ' + (e && e.message)); if (e && e.codigo) throw e; }
+  MEMO_.regLectura = t || tabla_(nombre);
+  return MEMO_.regLectura;
+}
+
+function registrosDeCache_() {
+  if (PropertiesService.getScriptProperties().getProperty('CACHE_REGISTROS') === 'NO') return null;
+  var cache = CacheService.getScriptCache();
+  var v = cache.get('reg:v') || iniciarVersionRegistros_();
+  if (!v) return null;
+  var sh = hoja_(HOJAS.REG);
+  revisarEncabezados_(sh, HOJAS.REG);
+  var n = Number(cache.get('reg:' + v + ':n') || 0);
+  if (n > 0) {
+    var claves = [];
+    for (var i = 0; i < n; i++) claves.push('reg:' + v + ':' + i);
+    var trozos = cache.getAll(claves);
+    if (claves.every(function (k) { return typeof trozos[k] === 'string'; })) {
+      var filas = expandirFilas_(descomprimir_(claves.map(function (k) { return trozos[k]; }).join('')));
+      if (filas) return { sh: sh, filas: filas, deCache: true };
+    }
+  }
+  // No estaba (o se perdió un pedazo): se lee la hoja y se guarda con la versión vista ANTES de leer.
+  var t = tabla_(HOJAS.REG);
+  try { guardarRegistrosEnCache_(v, t.filas); } catch (e) { console.warn('no se guardó la caché: ' + (e && e.message)); }
+  return t;
+}
+
+/** Solo con el candado (y sin esperar casi nada): así nadie crea una versión mientras otro escribe. */
+function iniciarVersionRegistros_() {
+  var lock = candado_(3000, true);
+  if (!lock) return null;
+  try {
+    var cache = CacheService.getScriptCache();
+    var v = cache.get('reg:v');
+    if (!v) { v = Utilities.getUuid().replace(/-/g, '').slice(0, 10); cache.put('reg:v', v, CACHE_REG_SEG); }
+    return v;
+  } finally {
+    soltar_(lock);
+  }
+}
+
+function guardarRegistrosEnCache_(v, filas) {
+  var cols = COLS[HOJAS.REG];
+  var datos = filas.map(function (f) { var a = [f.fila]; for (var c = 0; c < cols.length; c++) a.push(f.o[cols[c]]); return a; });
+  var txt = comprimir_(JSON.stringify({ c: cols.join(','), f: datos }));
+  var n = Math.ceil(txt.length / CACHE_TROZO);
+  if (n > 250) return;   // demasiado grande para la caché: se seguirá leyendo la hoja
+  var trozos = {};
+  for (var i = 0; i < n; i++) trozos['reg:' + v + ':' + i] = txt.slice(i * CACHE_TROZO, (i + 1) * CACHE_TROZO);
+  trozos['reg:' + v + ':n'] = String(n);
+  CacheService.getScriptCache().putAll(trozos, CACHE_REG_SEG);
+}
+
+function expandirFilas_(json) {
+  var d = JSON.parse(json), cols = COLS[HOJAS.REG];
+  if (!d || d.c !== cols.join(',')) return null;   // otras columnas (versión distinta del código): no sirve
+  return d.f.map(function (a) {
+    var o = {};
+    for (var c = 0; c < cols.length; c++) o[cols[c]] = a[c + 1];
+    return { fila: a[0], o: o };
+  });
+}
+
+function comprimir_(texto) {
+  return Utilities.base64Encode(Utilities.gzip(Utilities.newBlob(texto, 'application/json')).getBytes());
+}
+
+function descomprimir_(b64) {
+  return Utilities.ungzip(Utilities.newBlob(Utilities.base64Decode(b64), 'application/x-gzip')).getDataAsString();
+}
+
+/** Después de escribir en Registros (y del flush): la versión cambia y las copias viejas dejan de usarse. */
+function publicarCambiosRegistros_() {
+  if (!MEMO_.regSucio) return;
+  MEMO_.regSucio = false;
+  MEMO_.regLectura = null;
+  try { SpreadsheetApp.flush(); } catch (e0) { /* ya se intentó en soltar_ */ }
+  invalidarRegistros_();
+}
+
+function invalidarRegistros_() {
+  var cache = CacheService.getScriptCache();
+  try { cache.remove('reg:v'); } catch (e) { console.error('no se pudo quitar la versión de la caché: ' + (e && e.message)); }
+  cache.put('reg:v', Utilities.getUuid().replace(/-/g, '').slice(0, 10), CACHE_REG_SEG);
+}
+
+/** Lo que se lee una vez por petición deja de valer cuando se escribe en esa pestaña. */
+function marcarEscrito_(nombre) {
+  if (nombre === HOJAS.REG) { MEMO_.regSucio = true; MEMO_.regLectura = null; }
+  if (nombre === HOJAS.CFG) MEMO_.cfg = null;
+  if (nombre === HOJAS.USR) MEMO_.usr = null;
 }
 
 function leerValor_(x, numerico) {
@@ -1785,60 +2129,58 @@ function seguro_(v) {
   return /^[=+\-@]/.test(v) ? "'" + v : v;
 }
 
-function escribirFila_(sh, nombre, fila, o) {
-  var cols = COLS[nombre];
+/** Un objeto → los valores de su renglón, en el orden de COLS (texto seguro o número). */
+function valoresFila_(nombre, o) {
   var num = NUMERICAS[nombre] || {};
-  var valores = cols.map(function (c) {
+  return COLS[nombre].map(function (c) {
     var v = o[c];
     if (num[c]) return v === '' || v === null || v === undefined ? '' : Number(v);
     return seguro_(v === null || v === undefined ? '' : String(v));
   });
+}
+
+/** Formato de cada celda del renglón: '0' en las numéricas, texto ('@') en las demás. */
+function formatosFila_(nombre) {
+  var num = NUMERICAS[nombre] || {};
+  return COLS[nombre].map(function (c) { return num[c] ? '0' : '@'; });
+}
+
+function escribirFila_(sh, nombre, fila, o) {
   asegurarFilas_(sh, fila);
-  var rng = sh.getRange(fila, 1, 1, cols.length);
-  rng.setNumberFormats([cols.map(function (c) { return num[c] ? '0' : '@'; })]);
-  rng.setValues([valores]);
+  var rng = sh.getRange(fila, 1, 1, COLS[nombre].length);
+  rng.setNumberFormats([formatosFila_(nombre)]);
+  rng.setValues([valoresFila_(nombre, o)]);
+  marcarEscrito_(nombre);
 }
 
 /** Escribe varios registros seguidos, a partir de la fila «desde», en una sola operación. */
 function escribirBloque_(sh, nombre, desde, objetos) {
   if (!objetos.length) return;
-  var cols = COLS[nombre], num = NUMERICAS[nombre] || {};
-  var valores = objetos.map(function (o) {
-    return cols.map(function (c) {
-      var v = o[c];
-      if (num[c]) return v === '' || v === null || v === undefined ? '' : Number(v);
-      return seguro_(v === null || v === undefined ? '' : String(v));
-    });
-  });
-  var formatos = objetos.map(function () { return cols.map(function (c) { return num[c] ? '0' : '@'; }); });
+  var fmt = formatosFila_(nombre);
   asegurarFilas_(sh, desde + objetos.length - 1);
-  var rng = sh.getRange(desde, 1, objetos.length, cols.length);
-  rng.setNumberFormats(formatos);
-  rng.setValues(valores);
+  var rng = sh.getRange(desde, 1, objetos.length, COLS[nombre].length);
+  rng.setNumberFormats(objetos.map(function () { return fmt; }));
+  rng.setValues(objetos.map(function (o) { return valoresFila_(nombre, o); }));
+  marcarEscrito_(nombre);
 }
 
-/** Reescribe en una sola operación el bloque que va de la primera a la última fila cambiada. */
+/** Reescribe en una sola operación el bloque que va de la primera a la última fila cambiada (con el candado tomado). */
 function escribirVarias_(t, nombre, cambiadas) {
   if (!cambiadas.length) return;
   if (cambiadas.length <= 5) { cambiadas.forEach(function (f) { escribirFila_(t.sh, nombre, f.fila, f.o); }); return; }
-  var cols = COLS[nombre], num = NUMERICAS[nombre] || {};
   var porFila = {};
   t.filas.forEach(function (f) { porFila[f.fila] = f.o; });
   var desde = Math.min.apply(null, cambiadas.map(function (f) { return f.fila; }));
   var hasta = Math.max.apply(null, cambiadas.map(function (f) { return f.fila; }));
-  var valores = [], formatos = [];
+  var fmt = formatosFila_(nombre), valores = [], formatos = [];
   for (var r = desde; r <= hasta; r++) {
-    var o = porFila[r] || {};
-    valores.push(cols.map(function (c) {
-      var v = o[c];
-      if (num[c]) return v === '' || v === null || v === undefined ? '' : Number(v);
-      return seguro_(v === null || v === undefined ? '' : String(v));
-    }));
-    formatos.push(cols.map(function (c) { return num[c] ? '0' : '@'; }));
+    valores.push(valoresFila_(nombre, porFila[r] || {}));
+    formatos.push(fmt);
   }
-  var rng = t.sh.getRange(desde, 1, hasta - desde + 1, cols.length);
+  var rng = t.sh.getRange(desde, 1, hasta - desde + 1, COLS[nombre].length);
   rng.setNumberFormats(formatos);
   rng.setValues(valores);
+  marcarEscrito_(nombre);
 }
 
 function asegurarFilas_(sh, fila) {

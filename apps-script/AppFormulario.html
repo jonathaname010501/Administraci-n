@@ -1,0 +1,491 @@
+<script>
+  /* Control de Gestión · Directorio en el formulario, alta y edición, varios destinatarios. Es una parte de la app: se junta con las demás App*.html (ver FRAGMENTOS_APP en Servidor.gs). */
+  /* ───────────────────────── Buscador de personas ───────────────────────── */
+  /** Personas del directorio que coinciden con el texto: primero por NOMBRE, después por cargo o dependencia. */
+  function buscarEnDirectorio(texto, excluir) {
+    var palabras = norm(texto).split(' ').filter(Boolean);
+    return E.directorio.map(function (p) {
+      if (excluir && excluir[p.id]) return null;
+      var n = p._n || (p._n = norm(p.nombre));
+      var b = p._b || (p._b = norm(p.nombre + ' ' + p.cargo + ' ' + (p.dependencia || '')));
+      if (!palabras.every(function (w) { return b.indexOf(w) >= 0; })) return null;
+      return { p: p, peso: palabras.every(function (w) { return n.indexOf(w) >= 0; }) ? 0 : 1 };
+    }).filter(Boolean).sort(function (a, b) { return a.peso - b.peso; }).slice(0, 30).map(function (x) { return x.p; });
+  }
+
+  /**
+   * «Varios destinatarios»: se eligen personas del directorio y quedan como
+   * fichas (chips). Cada ficha tiene su ✕ para quitarla.
+   */
+  function comboVarios(maximo, alCambiar) {
+    var elegidos = [];
+    var input = h('input', { class: 'entrada', autocomplete: 'off', role: 'combobox', 'aria-expanded': 'false', 'aria-label': 'Agregar destinatario',
+      placeholder: 'Escribe un nombre y elígelo de la lista…', enterkeyhint: 'search' });
+    var lista = h('div', { class: 'combo__lista oculto', role: 'listbox' });
+    var fichas = h('div', { class: 'fichas', 'aria-live': 'polite' });
+    var cuenta = h('span', { class: 'fichas__cuenta' });
+    var opciones = [], activa = -1;
+    function pintar() {
+      vaciar(fichas);
+      elegidos.forEach(function (p, i) {
+        fichas.appendChild(h('span', { class: 'ficha', title: p.cargo || '' }, h('span', { class: 'ficha__n' }, i + 1), h('span', { class: 'ficha__t' }, p.nombre),
+          h('button', { type: 'button', class: 'ficha__x', 'aria-label': 'Quitar a ' + p.nombre, onclick: function () {
+            elegidos = elegidos.filter(function (x) { return x.id !== p.id; }); pintar(); if (!esCelular()) input.focus();
+          } }, '✕')));
+      });
+      if (!elegidos.length) fichas.appendChild(h('span', { class: 'fichas__vacio' }, 'Todavía no hay destinatarios.'));
+      cuenta.textContent = elegidos.length + ' de ' + maximo + ' como máximo';
+      cuenta.classList.toggle('fichas__cuenta--tope', elegidos.length >= maximo);
+      if (alCambiar) alCambiar(elegidos);
+    }
+    function agregar(p) {
+      if (elegidos.length >= maximo) { aviso('El máximo por vez es ' + maximo + ' destinatarios.', 'error'); return; }
+      if (!elegidos.some(function (x) { return x.id === p.id; })) elegidos.push(p);
+      input.value = ''; cerrarLista(); pintar(); input.focus();
+    }
+    function cerrarLista() { lista.classList.add('oculto'); input.setAttribute('aria-expanded', 'false'); activa = -1; }
+    function abrir() {
+      var ya = {};
+      elegidos.forEach(function (x) { ya[x.id] = true; });
+      var res = input.value.trim() ? buscarEnDirectorio(input.value, ya) : [];
+      vaciar(lista); opciones = [];
+      res.forEach(function (p) {
+        var b = h('button', { type: 'button', class: 'combo__op', role: 'option', onmousedown: function (ev) { ev.preventDefault(); agregar(p); } }, p.nombre, p.cargo ? h('small', null, p.cargo) : null);
+        opciones.push({ el: b, p: p }); lista.appendChild(b);
+      });
+      if (input.value.trim().length >= 3 && puedeCapturar()) {
+        var texto = input.value.trim();
+        var nueva = h('button', { type: 'button', class: 'combo__op combo__op--nueva', onmousedown: function (ev) {
+          ev.preventDefault(); cerrarLista();
+          modalPersona({ nombre: texto }).then(function (p) { if (p) agregar(p); });
+        } }, '+ Agregar «' + texto + '» al directorio');
+        opciones.push({ el: nueva, nueva: true }); lista.appendChild(nueva);
+      }
+      if (!input.value.trim()) { cerrarLista(); return; }
+      if (!opciones.length) lista.appendChild(h('div', { class: 'combo__op', style: { color: 'var(--texto-3)' } }, 'Sin coincidencias'));
+      lista.classList.remove('oculto'); input.setAttribute('aria-expanded', 'true');
+    }
+    input.addEventListener('input', abrir);
+    input.addEventListener('focus', function () { if (input.value) abrir(); });
+    input.addEventListener('blur', function () { setTimeout(cerrarLista, 120); });
+    input.addEventListener('keydown', function (ev) {
+      if (lista.classList.contains('oculto')) { if (ev.key === 'ArrowDown') abrir(); return; }
+      if (ev.key === 'ArrowDown' || ev.key === 'ArrowUp') {
+        ev.preventDefault();
+        activa = Math.max(0, Math.min(opciones.length - 1, activa + (ev.key === 'ArrowDown' ? 1 : -1)));
+        opciones.forEach(function (x, i) { x.el.classList.toggle('activa', i === activa); });
+        if (opciones[activa]) opciones[activa].el.scrollIntoView({ block: 'nearest' });
+      } else if (ev.key === 'Enter') {
+        ev.preventDefault();
+        var op = opciones[activa >= 0 ? activa : 0];
+        if (!op) return;
+        if (op.nueva) op.el.dispatchEvent(new MouseEvent('mousedown')); else agregar(op.p);
+      } else if (ev.key === 'Escape') { ev.stopPropagation(); cerrarLista(); }
+    });
+    pintar();
+    var el = h('div', { class: 'campo ancho varios' },
+      h('div', { class: 'varios__cab' }, h('label', { for: (input.id = 'c' + Math.random().toString(36).slice(2, 9)) }, 'Destinatarios', h('span', { style: { color: 'var(--guinda)' } }, ' *')), cuenta),
+      fichas, h('div', { class: 'combo' }, input, lista),
+      h('div', { class: 'campo__ayuda' }, 'Se crea un oficio para cada persona, con número propio y seguido, y el mismo asunto, firma, fecha y elaboró.'));
+    return { el: el, input: input, elegidos: function () { return elegidos.slice(); } };
+  }
+
+  function comboPersona(etiqueta, inicial, o) {
+    o = o || {};
+    var sel = { id: inicial.id || '', texto: inicial.texto || '' };
+    var input = h('input', { class: 'entrada', autocomplete: 'off', value: lineas(sel.texto).primera, role: 'combobox', 'aria-expanded': 'false', placeholder: 'Escribe para buscar en el directorio…' });
+    var estado = h('div', { class: 'combo__sel' });
+    var lista = h('div', { class: 'combo__lista oculto', role: 'listbox' });
+    var opciones = [], activa = -1;
+    function pintarEstado() {
+      vaciar(estado);
+      if (sel.id) {
+        var p = E.directorio.filter(function (x) { return x.id === sel.id; })[0];
+        var cargo = lineas(sel.texto).resto || (p && p.cargo) || '';
+        estado.appendChild(h('span', { class: 'ok' }, '✓ En directorio')); if (cargo) estado.appendChild(h('span', { class: 'combo__cargo', title: cargo }, '· ' + cargo));
+      } else if (sel.texto) {
+        estado.appendChild(h('span', { class: 'libre' }, 'Texto libre: no está en el directorio'));
+        var resto = lineas(sel.texto).resto; if (resto) estado.appendChild(h('span', { class: 'combo__cargo', title: resto }, '· ' + resto));
+      }
+    }
+    function elegir(p) {
+      sel.id = p.id; sel.texto = p.nombre + (p.cargo ? '\n' + p.cargo : '');
+      input.value = p.nombre; cerrarLista(); pintarEstado();
+      if (o.alCambiar) o.alCambiar(sel);
+    }
+    function cerrarLista() { lista.classList.add('oculto'); input.setAttribute('aria-expanded', 'false'); activa = -1; }
+    function abrir() {
+      var res = buscarEnDirectorio(input.value);
+      vaciar(lista); opciones = [];
+      res.forEach(function (p) {
+        var b = h('button', { type: 'button', class: 'combo__op', role: 'option', onmousedown: function (ev) { ev.preventDefault(); elegir(p); } }, p.nombre, p.cargo ? h('small', null, p.cargo) : null);
+        opciones.push({ el: b, p: p }); lista.appendChild(b);
+      });
+      if (input.value.trim().length >= 3 && puedeCapturar()) {
+        var nueva = h('button', { type: 'button', class: 'combo__op combo__op--nueva', onmousedown: function (ev) {
+          ev.preventDefault(); cerrarLista();
+          modalPersona({ nombre: input.value.trim() }).then(function (p) { if (p) elegir(p); });
+        } }, '+ Agregar «' + input.value.trim() + '» al directorio');
+        opciones.push({ el: nueva, nueva: true }); lista.appendChild(nueva);
+      }
+      if (!opciones.length) lista.appendChild(h('div', { class: 'combo__op', style: { color: 'var(--texto-3)' } }, 'Sin coincidencias'));
+      lista.classList.remove('oculto'); input.setAttribute('aria-expanded', 'true');
+    }
+    input.addEventListener('input', function () {
+      sel.id = ''; sel.texto = input.value; pintarEstado(); abrir();
+      if (o.alCambiar) o.alCambiar(sel);
+    });
+    input.addEventListener('focus', function () { if (input.value) abrir(); });
+    input.addEventListener('blur', function () { setTimeout(cerrarLista, 120); });
+    input.addEventListener('keydown', function (ev) {
+      if (lista.classList.contains('oculto')) { if (ev.key === 'ArrowDown') abrir(); return; }
+      if (ev.key === 'ArrowDown' || ev.key === 'ArrowUp') {
+        ev.preventDefault();
+        activa = Math.max(0, Math.min(opciones.length - 1, activa + (ev.key === 'ArrowDown' ? 1 : -1)));
+        opciones.forEach(function (x, i) { x.el.classList.toggle('activa', i === activa); });
+        if (opciones[activa]) opciones[activa].el.scrollIntoView({ block: 'nearest' });
+      } else if (ev.key === 'Enter' && activa >= 0 && opciones[activa]) {
+        ev.preventDefault();
+        if (opciones[activa].nueva) opciones[activa].el.dispatchEvent(new MouseEvent('mousedown'));
+        else elegir(opciones[activa].p);
+      } else if (ev.key === 'Escape') { ev.stopPropagation(); cerrarLista(); }
+    });
+    pintarEstado();
+    return { el: campo(etiqueta, h('div', { class: 'combo' }, input, lista), { ancho: o.ancho }), estado: estado, valor: function () { return sel; }, input: input,
+      montarEstado: function () { input.parentNode.parentNode.appendChild(estado); } };
+  }
+
+  function modalPersona(prefill, existente) {
+    return new Promise(function (resolver) {
+      var resuelto = false;
+      var nombre = h('input', { class: 'entrada', value: (existente || prefill).nombre || '', maxlength: 200 });
+      var cargo = h('input', { class: 'entrada', value: (existente || prefill).cargo || '', maxlength: 300 });
+      var dep = h('input', { class: 'entrada', value: (existente || prefill).dependencia || '', maxlength: 200 });
+      var activo = existente && esAdmin() ? h('input', { type: 'checkbox', checked: existente.activo !== 'NO' }) : null;
+      var msg = h('div');
+      function guardar(confirmarNueva) {
+        llamar('guardarPersona', { id: existente ? existente.id : '', nombre: nombre.value, cargo: cargo.value, dependencia: dep.value,
+          activo: activo ? (activo.checked ? 'SI' : 'NO') : undefined, confirmar: !!confirmarNueva }).then(function (r) {
+          var p = r.persona;
+          E.directorio = E.directorio.filter(function (x) { return x.id !== p.id; });
+          if (p.activo === 'SI') E.directorio.push({ id: p.id, nombre: p.nombre, cargo: p.cargo, dependencia: p.dependencia });
+          E.directorio.sort(function (a, b) { return a.nombre.localeCompare(b.nombre, 'es'); });
+          aviso(existente ? 'Datos actualizados.' : 'Agregado al directorio: ' + p.nombre, 'ok');
+          resuelto = true; v.cerrar(); resolver(p);
+        }).catch(function (e) {
+          if (e.codigo === 'PARECIDO') {
+            vaciar(msg).appendChild(h('div', { class: 'alerta alerta--aviso', style: { display: 'grid', gap: '8px' } },
+              h('strong', null, e.message),
+              e.extra.parecidos.map(function (p) {
+                return h('div', { style: { display: 'flex', gap: '8px', alignItems: 'center' } },
+                  h('div', { style: { flex: 1 } }, p.nombre, p.cargo ? h('div', { style: { fontSize: '12px' } }, p.cargo) : null),
+                  h('button', { class: 'btn btn--chico', onclick: function () {
+                    var q = E.directorio.filter(function (x) { return x.id === p.id; })[0] || p;
+                    resuelto = true; v.cerrar(); resolver(q);
+                  } }, 'Es esta'));
+              }),
+              h('button', { class: 'btn btn--chico', onclick: function () { guardar(true); } }, 'No, es otra persona: agregarla')));
+          } else vaciar(msg).appendChild(h('div', { class: 'alerta alerta--error' }, e.message));
+        });
+      }
+      var v = ventana({ titulo: existente ? 'Editar persona' : 'Agregar al directorio', ancho: 520, cuidar: true,
+        alCerrar: function () { if (!resuelto) resolver(null); },
+        cuerpo: [msg, campo('Nombre (con grado: Lic., Mtra., C.…)', nombre, { req: true }), campo('Cargo', cargo), campo('Dependencia o área', dep),
+          activo ? h('label', { class: 'casilla' }, activo, 'Activa (aparece al capturar)') : null],
+        pie: [h('button', { class: 'btn', onclick: function () { v.cerrar(); } }, 'Cancelar'), h('button', { class: 'btn btn--prim', onclick: function () { guardar(false); } }, 'Guardar')] });
+    });
+  }
+
+  /* ───────────────────────── Formulario de registro ───────────────────────── */
+  function formulario(t, reg, opciones) {
+    opciones = opciones || {};
+    var def = tipoDef(t), nuevo = !reg, pre = opciones.prefill || {};
+    var base = reg || {};
+    function ini(k, d) { return base[k] !== undefined && base[k] !== null && base[k] !== '' ? base[k] : (pre[k] !== undefined ? pre[k] : d); }
+    var plazo = Number(E.ini.config.plazo_dias) || 0;
+    var ctrl = {}, limiteTocado = !!base.fecha_limite;
+    // Al capturar, propone a quien más se repite en esta libreta (casi siempre
+    // firma el mismo titular y los entrantes van dirigidos a la misma persona).
+    if (nuevo && !opciones.copia && E.tipo === t && E.lista.length) {
+      [['dirigido_id', 'dirigido_a'], ['firma_id', 'firma']].forEach(function (par) {
+        if (pre[par[0]] || (par[0] === 'firma_id' && def.recibido) || (par[0] === 'dirigido_id' && !def.recibido)) return;
+        var cuenta = {}, mejor = null;
+        E.lista.slice(0, 80).forEach(function (r) {
+          if (!r[par[0]]) return;
+          cuenta[r[par[0]]] = (cuenta[r[par[0]]] || 0) + 1;
+          if (!mejor || cuenta[r[par[0]]] > cuenta[mejor[par[0]]]) mejor = r;
+        });
+        var p = mejor && E.directorio.filter(function (x) { return x.id === mejor[par[0]]; })[0];
+        if (p) { pre[par[0]] = p.id; pre[par[1]] = p.nombre + (p.cargo ? '\n' + p.cargo : ''); }
+      });
+    }
+    var rejilla = h('div', { class: 'rejilla' });
+    var combos = {};
+    def.campos.forEach(function (c) {
+      var k = c[0], et = c[1];
+      if (k === 'dirigido' || k === 'firma') {
+        var idk = k === 'dirigido' ? 'dirigido_id' : 'firma_id', txk = k === 'dirigido' ? 'dirigido_a' : 'firma';
+        var cb = comboPersona(et, { id: ini(idk, ''), texto: ini(txk, '') }, { ancho: false });
+        combos[k] = cb; rejilla.appendChild(cb.el); cb.montarEstado();
+      } else if (k === 'asunto' || k === 'observaciones') {
+        ctrl[k] = h('textarea', { class: 'entrada', rows: k === 'asunto' ? 3 : 3, maxlength: k === 'asunto' ? 3000 : 6000, value: ini(k, '') });
+        rejilla.appendChild(campo(et, ctrl[k], { ancho: true, req: k === 'asunto' }));
+      } else if (k === 'fecha' || k === 'fecha_recepcion') {
+        var defecto = nuevo && ((k === 'fecha' && !def.recibido) || k === 'fecha_recepcion') ? hoyIso() : '';
+        ctrl[k] = h('input', { class: 'entrada', type: 'date', value: ini(k, defecto), min: '2000-01-01', max: '2100-12-31' });
+        rejilla.appendChild(campo(et, ctrl[k], { req: k === 'fecha' }));
+      } else if (k === 'acuse') {
+        ctrl[k] = h('input', { type: 'checkbox', checked: ini(k, 'NO') === 'SI' });
+        rejilla.appendChild(h('div', { class: 'campo' }, h('span', { class: 'campo__et' }, et), h('label', { class: 'casilla' }, ctrl[k], t === 'OFE' ? 'Se tiene el original' : 'Ya se tiene el acuse')));
+      } else if (k === 'elaboro') {
+        var lista = h('datalist', { id: 'dl-elaboro' }, (E.ini.sugerenciasElaboro || []).map(function (s) { return h('option', { value: s }); }));
+        ctrl[k] = h('input', { class: 'entrada', list: 'dl-elaboro', maxlength: 120, value: ini(k, '') });
+        rejilla.appendChild(h('div', null, campo(et, ctrl[k], { ayuda: 'Elige de la lista para que se escriba siempre igual.' }), lista));
+      } else {
+        ctrl[k] = h('input', { class: 'entrada', maxlength: k === 'carpeta' ? 40 : k === 'area' ? 400 : 150, value: ini(k, '') });
+        rejilla.appendChild(campo(et, ctrl[k], { ancho: k === 'area' }));
+      }
+    });
+
+    // «Varios destinatarios»: el mismo oficio para varias personas (solo al dar de alta un oficio saliente)
+    var modoVarios = false, varios = null, interruptorVarios = null;
+    if (nuevo && def.numeroAuto && combos.dirigido && !opciones.original && !opciones.copia && tiene('guardarVarios')) {
+      varios = comboVarios(E.ini.maxVarios || 100, function () { if (modoVarios) textoBoton(); });
+      varios.el.classList.add('oculto');
+      combos.dirigido.el.parentNode.insertBefore(varios.el, combos.dirigido.el.nextSibling);
+      var chk = h('input', { type: 'checkbox', onchange: function () { cambiarModo(chk.checked); } });
+      interruptorVarios = h('label', { class: 'interruptor' }, chk, h('span', { class: 'interruptor__t' }, icono('grupo'),
+        h('span', null, h('strong', null, 'Varios destinatarios'), h('small', null, 'El mismo oficio para varias personas, cada una con su número.'))));
+    }
+    function cambiarModo(si) {
+      modoVarios = si;
+      combos.dirigido.el.classList.toggle('oculto', si);
+      varios.el.classList.toggle('oculto', !si);
+      if (archivos) archivos.classList.toggle('oculto', si);
+      if (notaArchivos) notaArchivos.classList.toggle('oculto', !si);
+      if (previo) previo.classList.toggle('oculto', si);
+      textoBoton();
+      vaciar(msg);
+      if (si) varios.input.focus();
+    }
+
+    // Seguimiento
+    var estOps = [['', 'Sin estatus']].concat(E.ini.estatus.filter(function (s) { return s !== 'Cancelado' || esAdmin() || base.estatus === 'Cancelado'; }).map(function (s) { return [s, s]; }));
+    var estDef = nuevo ? (def.recibido ? 'Pendiente' : '') : '';
+    ctrl.estatus = h('select', { class: 'entrada' }, estOps.map(function (o) { return h('option', { value: o[0], selected: o[0] === ini('estatus', estDef) }, o[1]); }));
+    ctrl.fecha_limite = h('input', { class: 'entrada', type: 'date', value: ini('fecha_limite', ''), min: '2000-01-01', max: '2100-12-31', oninput: function () { limiteTocado = true; } });
+    var dlTurno = h('datalist', { id: 'dl-turno' }, E.directorio.map(function (p) { return h('option', { value: p.nombre }); }));
+    ctrl.turnado_a = h('input', { class: 'entrada', list: 'dl-turno', maxlength: 300, value: ini('turnado_a', '') });
+    // Turnar a una persona del sistema: le aparece en «Mis asuntos»
+    var campoTurno = null, notaTurno = h('div', { class: 'campo__ayuda' }, 'Le aparece en «Mis asuntos». Solo se muestran usuarios activos con acceso a esta libreta.');
+    if (tiene('usuariosTurno')) {
+      var turnoActual = ini('turnado_usuario', '');
+      ctrl.turnado_usuario = h('select', { class: 'entrada', 'aria-label': 'Turnar a una persona del sistema' },
+        h('option', { value: '' }, '— Nadie —'),
+        turnoActual ? h('option', { value: turnoActual, selected: true }, base.turnado_nombre || (opciones.copia && opciones.copia.turnado_nombre) || turnoActual) : null);
+      ctrl.turnado_usuario.addEventListener('change', function () {
+        if (ctrl.turnado_usuario.value && !ctrl.estatus.value) {
+          ctrl.estatus.value = 'Pendiente';
+          notaTurno.textContent = 'Se cambió el estatus a «Pendiente» para que le aparezca como asunto por atender.';
+        }
+      });
+      usuariosParaTurnar(t).then(function (us) {
+        var sel = ctrl.turnado_usuario.value;
+        vaciar(ctrl.turnado_usuario).appendChild(h('option', { value: '' }, '— Nadie —'));
+        var esta = false;
+        us.forEach(function (u) {
+          if (u.usuario === sel) esta = true;
+          ctrl.turnado_usuario.appendChild(h('option', { value: u.usuario, selected: u.usuario === sel }, u.nombre + (u.usuario === E.ini.yo.usuario ? ' (yo)' : '')));
+        });
+        if (sel && !esta) ctrl.turnado_usuario.appendChild(h('option', { value: sel, selected: true }, (base.turnado_nombre || sel) + ' (ya no tiene acceso)'));
+        ctrl.turnado_usuario.value = sel;
+      }).catch(function () { /* se queda con lo que ya tenía */ });
+      campoTurno = h('div', { class: 'campo ancho' }, campo('Turnar a una persona del sistema', ctrl.turnado_usuario), notaTurno);
+    }
+    var relacionado = ini('relacionado_id', '');
+    var cajaRel = h('div');
+    function pintarRel() {
+      vaciar(cajaRel);
+      if (!relacionado) return;
+      var orig = opciones.original;
+      cajaRel.appendChild(h('div', { class: 'alerta alerta--info', style: { display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' } },
+        h('span', { style: { flex: 1 } }, 'En respuesta a ', orig ? tipoDef(orig.tipo).singular.toLowerCase() + ' ' + etiquetaNum(orig) + (orig.numero ? ' (' + orig.numero + ')' : '') : 'otro registro'),
+        h('button', { type: 'button', class: 'btn btn--chico btn--fantasma', onclick: function () { relacionado = ''; pintarRel(); } }, 'Quitar relación')));
+    }
+    pintarRel();
+    var marcarAtendido = opciones.original ? h('input', { type: 'checkbox', checked: true }) : null;
+    if (plazo && def.recibido && ctrl.fecha_recepcion) {
+      var calc = function () { if (!limiteTocado && ctrl.fecha_recepcion.value) ctrl.fecha_limite.value = sumarHabiles(ctrl.fecha_recepcion.value, plazo); };
+      ctrl.fecha_recepcion.addEventListener('change', calc);
+      if (nuevo) calc();
+    }
+    var segui = h('fieldset', { class: 'grupo' }, h('legend', null, 'Seguimiento'),
+      h('div', { class: 'rejilla' }, campo('Estatus', ctrl.estatus), campo('Fecha límite de respuesta', ctrl.fecha_limite, { ayuda: plazo && def.recibido ? 'Se calcula con ' + plazo + ' días hábiles (sin sábados, domingos ni los días inhábiles de Configuración); puedes cambiarla.' : null }),
+        campoTurno,
+        h('div', { class: 'campo ancho' }, campo('Turnado a', ctrl.turnado_a, { ayuda: campoTurno ? 'Área o persona externa que lo atiende (texto libre).' : 'Área o persona que lo atiende.' }), dlTurno),
+        h('div', { class: 'ancho' }, cajaRel),
+        marcarAtendido ? h('label', { class: 'casilla ancho' }, marcarAtendido, 'Al guardar, marcar el original como «Atendido»') : null));
+
+    // Archivos (solo al dar de alta; después se manejan desde el detalle)
+    var fDoc = selectorArchivo('Documento escaneado');
+    var fAcu = selectorArchivo(t === 'OFE' ? 'Oficio original / acuse' : 'Acuse');
+    var archivos = nuevo ? h('fieldset', { class: 'grupo' }, h('legend', null, 'Archivos (opcional)'),
+      h('div', { class: 'rejilla' }, fDoc.el, fAcu.el)) : null;
+    var notaArchivos = varios ? h('div', { class: 'alerta alerta--info oculto' }, 'Con varios destinatarios, los escaneos y acuses se suben después en cada oficio (desde su detalle).') : null;
+
+    var previo = null;
+    if (def.numeroAuto && nuevo) {
+      var max = 0;
+      if (E.tipo === t && E.anio === E.ini.anioActual) E.lista.forEach(function (r) { max = Math.max(max, Number(r.consecutivo) || 0); });
+      var plantilla = E.ini.config.plantilla_OFS || '';
+      var ejemplo = max ? plantilla.replace('{NNN}', pad3(max + 1)).replace('{AAAA}', E.ini.anioActual) : '';
+      previo = h('div', { class: 'numero-previo' }, 'El número se asigna al guardar' + (ejemplo ? ' (si nadie más guarda antes, será ' : '.'),
+        ejemplo ? h('strong', null, ejemplo) : null, ejemplo ? ').' : null);
+    }
+    var msg = h('div');
+    var boton = h('button', { class: 'btn btn--prim', type: 'button', onclick: function () { if (modoVarios) enviarVarios(); else enviar(false); } });
+    function textoBoton() {
+      if (modoVarios) {
+        var n = varios.elegidos().length;
+        boton.textContent = n ? 'Revisar y crear ' + n + (n === 1 ? ' oficio' : ' oficios') : 'Elige los destinatarios';
+      } else boton.textContent = nuevo ? (def.numeroAuto ? 'Guardar y asignar número' : 'Guardar') : 'Guardar cambios';
+    }
+    textoBoton();
+
+    function datos() {
+      var d = { tipo: t };
+      if (!nuevo) { d.id = base.id; d.version = base.version; }
+      Object.keys(ctrl).forEach(function (k) { d[k] = ctrl[k].type === 'checkbox' ? (ctrl[k].checked ? 'SI' : 'NO') : ctrl[k].value; });
+      if (combos.dirigido) { d.dirigido_id = combos.dirigido.valor().id; d.dirigido_a = combos.dirigido.valor().texto; }
+      if (combos.firma) { d.firma_id = combos.firma.valor().id; d.firma = combos.firma.valor().texto; }
+      d.relacionado_id = relacionado;
+      if (marcarAtendido && marcarAtendido.checked) d.marcarAtendido = true;
+      if (opciones.copia) d.copia_de = opciones.copia.id;
+      return d;
+    }
+    var original = JSON.stringify(datos());
+
+    function enviar(confirmarDuplicado) {
+      var d = datos();
+      if (!String(d.asunto || '').trim()) { vaciar(msg).appendChild(h('div', { class: 'alerta alerta--error' }, 'Falta el asunto.')); ctrl.asunto.focus(); return; }
+      if (!d.fecha) { vaciar(msg).appendChild(h('div', { class: 'alerta alerta--error' }, 'Falta la fecha.')); ctrl.fecha.focus(); return; }
+      if (confirmarDuplicado) d.confirmarDuplicado = true;
+      boton.disabled = true; boton.textContent = 'Guardando…';
+      llamar('guardar', d).then(function (res) {
+        var r = res.registro, ultimo = res;
+        var anotar = function (x) { if (x && x.registro) ultimo = x; };   // la última respuesta trae el registro y su panel al día
+        var subidas = Promise.resolve();
+        if (nuevo && fDoc.archivo()) subidas = subidas.then(function () { return subirArchivo(r, 'oficio', fDoc.archivo()).then(anotar); });
+        if (nuevo && fAcu.archivo()) subidas = subidas.then(function () { return subirArchivo(r, 'acuse', fAcu.archivo()).then(anotar); });
+        return subidas.catch(function (e) { aviso('El registro se guardó, pero el archivo no: ' + e.message, 'error'); }).then(function () {
+          v.antesDeCerrar = null; v.cerrar();
+          if (res.sinCambios) aviso('No había cambios que guardar.');
+          else aviso((nuevo ? 'Registrado: ' : 'Guardado: ') + def.singular + ' ' + etiquetaNum(r) + (r.numero && def.numeroAuto ? ' · ' + r.numero : ''), 'ok');
+          if (nuevo && E.anio === E.ini.anioActual) E.ini.conteos[t] = (E.ini.conteos[t] || 0) + 1;
+          if (E.vista === 'pendientes' || E.vista === 'misAsuntos') irA(E.vista, null, { sinHistorial: true });
+          trasCambio(ultimo, r.id);
+          if (E.vista === 'libreta') cargarLista({ silencioso: true });
+        });
+      }).catch(function (e) {
+        boton.disabled = false; textoBoton();
+        if (e.codigo === 'DUPLICADO') {
+          confirmar(e.message, { titulo: 'Número repetido', si: 'Sí, es otro documento: guardar', no: 'Revisar' }).then(function (s) { if (s) enviar(true); });
+        } else {
+          vaciar(msg).appendChild(h('div', { class: 'alerta alerta--error' }, e.message));
+          msg.scrollIntoView({ block: 'nearest' });
+        }
+      });
+    }
+
+    function error(texto, foco) {
+      vaciar(msg).appendChild(h('div', { class: 'alerta alerta--error' }, texto));
+      msg.scrollIntoView({ block: 'nearest' });
+      if (foco) foco.focus();
+    }
+
+    /** Varios destinatarios: 1) vista previa de los números, 2) confirmar, 3) guardar todos juntos. */
+    function enviarVarios() {
+      var elegidos = varios.elegidos();
+      var d = datos();
+      if (!elegidos.length) return error('Elige al menos un destinatario.', varios.input);
+      if (!String(d.asunto || '').trim()) return error('Falta el asunto.', ctrl.asunto);
+      if (!d.fecha) return error('Falta la fecha.', ctrl.fecha);
+      delete d.dirigido_id; delete d.dirigido_a; delete d.relacionado_id; delete d.marcarAtendido;
+      d.destinatarios = elegidos.map(function (p) { return { dirigido_id: p.id, dirigido_a: p.nombre + (p.cargo ? '\n' + p.cargo : '') }; });
+      vaciar(msg);
+      boton.disabled = true; boton.textContent = 'Revisando…';
+      var listo = function () { boton.disabled = false; textoBoton(); };
+      var previa = Object.assign({}, d, { previa: true });
+      llamar('guardarVarios', previa).then(function (p) { listo(); confirmarVarios(d, p, ''); })
+        .catch(function (e) { listo(); error(e.message); });
+    }
+
+    function confirmarVarios(d, p, aviso1) {
+      var tabla = h('div', { class: 'previa-varios' }, p.numeros.map(function (x) {
+        return h('div', { class: 'previa-varios__f' }, h('strong', { class: 't-num' }, x.numero), h('span', null, lineas(x.dirigido_a).primera));
+      }));
+      var cuerpo = [
+        aviso1 ? h('div', { class: 'alerta alerta--aviso' }, aviso1) : null,
+        h('p', { class: 'previa-varios__t' }, 'Se crearán ', h('strong', null, p.cuantos + (p.cuantos === 1 ? ' oficio' : ' oficios')), ': del ', h('strong', null, p.desde), ' al ', h('strong', null, p.hasta), '.'),
+        h('p', { class: 'campo__ayuda', style: { margin: 0 } }, 'Mismo asunto, firma, fecha y elaboró. Cada oficio queda con su número, en este orden:'),
+        tabla
+      ];
+      var hecho = false;
+      var cv = ventana({ titulo: 'Confirmar ' + p.cuantos + (p.cuantos === 1 ? ' oficio' : ' oficios'), ancho: 560, sinFoco: true, cuidar: true, cuerpo: cuerpo,
+        pie: [h('button', { class: 'btn', onclick: function () { cv.cerrar(); } }, 'Revisar'),
+          h('button', { class: 'btn btn--prim', onclick: function () {
+            if (hecho) return;
+            hecho = true;
+            this.disabled = true; this.textContent = 'Guardando…';
+            llamar('guardarVarios', Object.assign({}, d, { desde: p.consecutivoDesde })).then(function (res) {
+              cv.cerrar();
+              v.antesDeCerrar = null; v.cerrar();
+              aviso('Registrados ' + res.cuantos + ' oficios: del ' + res.desde + ' al ' + res.hasta + '.', 'ok');
+              if (E.anio === E.ini.anioActual) E.ini.conteos[t] = (E.ini.conteos[t] || 0) + res.cuantos;
+              (res.registros || []).forEach(actualizarEnLista);   // ya se ven en la lista
+              E.iniT = 0;
+              if (E.vista === 'libreta') cargarLista({ silencioso: true });
+              resultadoVarios(res);
+            }).catch(function (e) {
+              cv.cerrar();
+              if (e.codigo === 'CAMBIO_NUMERO' && e.extra) confirmarVarios(d, e.extra, e.message);
+              else error(e.message);
+            });
+          } }, 'Sí, crear ' + p.cuantos + (p.cuantos === 1 ? ' oficio' : ' oficios'))] });
+    }
+
+    var v = ventana({
+      titulo: nuevo ? (opciones.copia ? 'Nuevo ' + def.singular.toLowerCase() + ' (copia de ' + etiquetaNum(opciones.copia) + ')' : 'Nuevo ' + def.singular.toLowerCase()) : 'Editar ' + def.singular.toLowerCase() + ' ' + etiquetaNum(base),
+      ancho: 820, cuidar: true,
+      cuerpo: [msg, interruptorVarios, previo, rejilla, segui, archivos, notaArchivos],
+      pie: [h('button', { class: 'btn', onclick: function () { v.intentarCerrar(); } }, 'Cancelar'), boton],
+      antesDeCerrar: function () {
+        if (JSON.stringify(datos()) === original && !fDoc.archivo() && !fAcu.archivo() && !(varios && varios.elegidos().length)) return true;
+        return confirmar('Hay cambios sin guardar. ¿Salir sin guardar?', { si: 'Salir sin guardar', no: 'Seguir editando', peligro: true });
+      }
+    });
+    if (panelActual && !nuevo) cerrarPanel();
+  }
+
+  /** Lo que se creó con «Varios destinatarios», para copiarlo o revisarlo. */
+  function resultadoVarios(res) {
+    var texto = res.registros.map(function (r) { return r.numero + '\t' + lineas(r.dirigido_a).primera; }).join('\n');
+    var rv = ventana({ titulo: res.cuantos + ' oficios registrados', ancho: 560, sinFoco: true,
+      cuerpo: [h('div', { class: 'alerta alerta--ok' }, 'Del ', h('strong', null, res.desde), ' al ', h('strong', null, res.hasta), '. Los escaneos y acuses se suben en cada oficio.'),
+        h('div', { class: 'previa-varios' }, res.registros.map(function (r) {
+          return h('button', { type: 'button', class: 'previa-varios__f previa-varios__f--btn', onclick: function () { rv.cerrar(); abrirDetalle(r.id, r); } },
+            h('strong', { class: 't-num' }, r.numero), h('span', null, lineas(r.dirigido_a).primera));
+        }))],
+      pie: [h('button', { class: 'btn', onclick: function () {
+        (navigator.clipboard ? navigator.clipboard.writeText(texto) : Promise.reject()).then(function () { aviso('Lista copiada.', 'ok'); }, function () { aviso('No se pudo copiar; selecciónala a mano.'); });
+      } }, icono('copiar'), 'Copiar lista'), h('button', { class: 'btn btn--prim', onclick: function () { rv.cerrar(); } }, 'Listo')] });
+  }
+
+  /** Usuarios a quienes se puede turnar en una libreta (se guardan 5 min en la página). */
+  var cacheTurno = {};
+  function usuariosParaTurnar(t) {
+    var c = cacheTurno[t];
+    if (c && Date.now() - c.cuando < 5 * 60 * 1000) return Promise.resolve(c.lista);
+    return llamar('usuariosTurno', { tipo: t }).then(function (lista) { cacheTurno[t] = { cuando: Date.now(), lista: lista }; return lista; });
+  }
+</script>

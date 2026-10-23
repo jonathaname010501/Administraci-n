@@ -75,7 +75,7 @@ testBase("velocidad: el historial nuevo es igual al de antes (mismo orden, mismo
 
 testBase("velocidad: entrar trae el portal y guardar trae el detalle (una vuelta menos)", () => {
   const e = preparar();
-  const ent = e.api(null, "entrar", { usuario: "admin", clave: "Gestion2026" }).datos;
+  const ent = e.api(null, "entrar", { usuario: "admin", clave: "Jacaranda2026x" }).datos;
   assert.ok(ent.inicio && ent.inicio.yo.usuario === "admin" && ent.inicio.indicadores.porTipo.OFS, "entrar trae los datos del portal");
   const ini = e.api(ent.token, "inicio").datos;
   assert.deepEqual(Object.keys(ent.inicio).sort(), Object.keys(ini).sort());
@@ -88,7 +88,7 @@ testBase("velocidad: entrar trae el portal y guardar trae el detalle (una vuelta
   // un usuario limitado recibe solo lo suyo
   const cap = alta(e, "beto", "captura", ["OFE"]);
   assert.ok(cap);
-  const entB = e.api(null, "entrar", { usuario: "beto", clave: "Minutario2026x" }).datos;
+  const entB = e.api(null, "entrar", { usuario: "beto", clave: "Ahuehuete2026x" }).datos;
   assert.deepEqual(entB.inicio.orden, ["OFE"]);
   assert.ok(!entB.inicio.acciones.includes("exportar") && !entB.inicio.acciones.includes("informes"));
   // guardar (alta y respuesta) regresa ligados e historial, igual que obtener
@@ -130,8 +130,8 @@ testBase("velocidad: en mantenimiento, entrar sigue sin dejar pasar a quien no e
   const e = preparar();
   alta(e, "beto", "captura", ["OFE"]);
   assert.equal(e.api(e.admin, "mantenimiento", { activo: true, mensaje: "Actualizando el sistema" }).ok, true);
-  const r = e.api(null, "entrar", { usuario: "beto", clave: "Minutario2026x" });
+  const r = e.api(null, "entrar", { usuario: "beto", clave: "Ahuehuete2026x" });
   assert.equal(r.codigo, "MANTENIMIENTO");
-  const a = e.api(null, "entrar", { usuario: "admin", clave: "Gestion2026" }).datos;
+  const a = e.api(null, "entrar", { usuario: "admin", clave: "Jacaranda2026x" }).datos;
   assert.equal(a.inicio.mantenimiento.activo, true, "el administrador entra y ve el aviso");
 });

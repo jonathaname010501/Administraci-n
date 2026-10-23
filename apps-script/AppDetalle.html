@@ -1,0 +1,421 @@
+<script>
+  /* Control de Gestión · Detalle, archivos, vista previa, volante y fotos. Es una parte de la app: se junta con las demás App*.html (ver FRAGMENTOS_APP en Servidor.gs). */
+  /* ───────────────────────── Detalle ───────────────────────── */
+  var panelActual = null;
+  function cerrarPanel() {
+    if (!panelActual) return;
+    var antes = panelActual.anterior;
+    panelActual.velo.remove(); panelActual.panel.remove();
+    document.removeEventListener('keydown', panelActual.tecla);
+    panelActual = null;
+    // El foco regresa al renglón (o botón) desde el que se abrió
+    if (antes && antes.focus && document.contains(antes)) { try { antes.focus(); } catch (e) { /* sin foco */ } }
+  }
+
+  var pedidoDetalle = 0;
+  /**
+   * Abre el panel de un registro. Si viene de una lista (previa), el panel sale
+   * al instante con lo que ya se ve y se completa cuando llega lo demás.
+   */
+  function abrirDetalle(id, previa) {
+    var n = ++pedidoDetalle;
+    if (previa && !(panelActual && panelActual.id === id)) pintarDetalle({ registro: previa, ligados: [], historial: [] }, true);
+    return llamar('obtener', { id: id }).then(function (d) {
+      if (n !== pedidoDetalle) return;                                 // mientras tanto se abrió otro
+      if (previa && (!panelActual || panelActual.id !== id)) return;   // lo cerraron antes de que llegara
+      pintarDetalle(d);
+    }).catch(function (e) {
+      if (n === pedidoDetalle && panelActual && panelActual.id === id && panelActual.previo) cerrarPanel();
+      fallo(e);
+    });
+  }
+
+  /** Pinta el panel con lo que ya regresó el servidor (guardar, cancelar, archivos); si no vino, lo pide. */
+  function mostrarDetalle(res, id) {
+    if (res && res.registro && res.detalle) {
+      pedidoDetalle++;
+      pintarDetalle({ registro: res.registro, ligados: res.detalle.ligados || [], historial: res.detalle.historial || [] });
+    } else {
+      abrirDetalle(id || (res && res.registro && res.registro.id));
+    }
+  }
+
+  function pintarDetalle(d, previo) {
+    var r = d.registro, t = r.tipo, def = tipoDef(t);
+    var mismo = !!(panelActual && panelActual.id === r.id);
+    if (!mismo) cerrarPanel();
+    var velo = h('div', { class: 'velo', onclick: cerrarPanel });
+    var cancelado = r.estatus === 'Cancelado';
+    var acciones = [];
+    if (puedeCapturar(t) && (!cancelado || esAdmin())) acciones.push(h('button', { class: 'btn btn--chico', onclick: function () { formulario(t, r); } }, icono('editar'), 'Editar'));
+    if (def.recibido && !cancelado && puedeCapturar('OFS')) {
+      acciones.push(h('button', { class: 'btn btn--chico', onclick: function () { responder(r); } }, icono('responder'), 'Responder con oficio'));
+    }
+    if (puedeCapturar(t)) acciones.push(h('button', { class: 'btn btn--chico', onclick: function () { duplicar(r); } }, icono('duplicar'), 'Duplicar'));
+    if (def.recibido) acciones.push(h('button', { class: 'btn btn--chico', onclick: function () { verVolante(r); } }, icono('imprimir'), 'Imprimir volante'));
+    if (def.numeroAuto && !cancelado && puedeCapturar(t) && tiene('generarOficio') && E.ini.config.plantillaDoc) {
+      acciones.push(h('button', { class: 'btn btn--chico', title: 'El oficio con su número, fecha y destinatario, para terminarlo en Word', onclick: function () { generarOficio(r, this); } }, icono('archivo'), 'Borrador en Word'));
+    }
+    acciones.push(h('button', { class: 'btn btn--chico btn--fantasma', onclick: function () {
+      var txt = def.singular + ' ' + etiquetaNum(r) + (r.numero ? ' · ' + r.numero : '');
+      (navigator.clipboard ? navigator.clipboard.writeText(txt) : Promise.reject()).then(function () { aviso('Copiado: ' + txt, 'ok'); }, function () { aviso(txt); });
+    } }, icono('copiar'), 'Copiar número'));
+    if (esAdmin() && !cancelado) acciones.push(h('button', { class: 'btn btn--chico btn--peligro', onclick: function () { cancelarRegistro(r); } }, icono('cancelar'), 'Cancelar'));
+    if (previo) acciones.forEach(function (b) { b.disabled = true; });   // se activan cuando llega el registro completo
+
+    var datos = h('dl', { class: 'datos' });
+    function fila(et, valor) { datos.appendChild(h('dt', null, et)); datos.appendChild(h('dd', { class: valor ? '' : 'vacio-dd' }, valor || '—')); }
+    def.campos.forEach(function (c) {
+      var k = c[0], v;
+      if (k === 'dirigido') v = r.dirigido_a;
+      else if (k === 'acuse') v = r.acuse === 'SI' ? 'Sí' : 'No';
+      else if (k === 'fecha' || k === 'fecha_recepcion') v = fechaCorta(r[k]);
+      else v = r[k];
+      if (previo && v === undefined) v = '…';
+      fila(c[1], v);
+    });
+
+    var seg = h('dl', { class: 'datos' });
+    function filaSeg(et, valor) { seg.appendChild(h('dt', null, et)); seg.appendChild(h('dd', { class: valor ? '' : 'vacio-dd' }, valor || '—')); }
+    seg.appendChild(h('dt', null, 'Estatus')); seg.appendChild(h('dd', null, insEstatus(r.estatus), ' ', insVence(r)));
+    filaSeg('Fecha límite', fechaCorta(r.fecha_limite));
+    if (r.turnado_usuario || tiene('misAsuntos')) {
+      seg.appendChild(h('dt', null, 'Responsable en el sistema'));
+      seg.appendChild(h('dd', { class: r.turnado_usuario ? '' : 'vacio-dd' }, r.turnado_usuario ? [r.turnado_nombre || r.turnado_usuario, esMio(r) ? [' ', insMio()] : null] : '—'));
+    }
+    filaSeg('Turnado a', r.turnado_a);
+
+    var ligados = d.ligados.length ? h('div', { style: { display: 'grid', gap: '6px' } }, d.ligados.map(function (x) {
+      var rel = x.id === r.relacionado_id ? 'Responde a' : 'Respondido con';
+      return h('button', { class: 'ligado', onclick: function () { abrirDetalle(x.id, x); } },
+        h('div', { style: { flex: 1, minWidth: 0 } }, h('div', { style: { fontSize: '12px', color: 'var(--texto-3)' } }, rel + ' · ' + tipoDef(x.tipo).singular),
+          h('div', null, h('strong', { class: 't-num' }, etiquetaNum(x)), ' ', x.numero || ''), h('div', { style: { fontSize: '12.5px' } }, x.asunto)),
+        insEstatus(x.estatus));
+    })) : null;
+
+    var cargando = function () { return h('p', { style: { margin: 0, color: 'var(--texto-3)' } }, 'Cargando…'); };
+    var archivos = previo ? cargando() : h('div', { style: { display: 'grid', gap: '8px' } },
+      bloqueArchivo(r, 'oficio', 'Documento escaneado', r.tiene_archivo, r.archivo_nombre),
+      bloqueArchivo(r, 'acuse', t === 'OFE' ? 'Oficio original / acuse' : 'Acuse', r.tiene_acuse_archivo, r.acuse_archivo_nombre));
+
+    var hist = previo ? cargando() : h('ul', { class: 'historial' }, d.historial.length ? d.historial.map(function (x) {
+      return h('li', null, h('strong', null, x.accion), ' · ', h('span', null, fechaCorta(x.fecha) + ' ' + String(x.fecha).slice(11, 16) + ' · ' + x.usuario), x.detalle ? h('div', null, x.detalle) : null);
+    }) : h('li', null, h('span', null, 'Sin movimientos registrados en el sistema.')));
+
+    var panel = h('aside', { class: 'panel', role: 'dialog', 'aria-modal': 'true', tabindex: '-1', 'aria-label': def.singular + ' ' + etiquetaNum(r) },
+      h('div', { class: 'panel__cab' },
+        h('div', { style: { flex: 1, minWidth: 0 } }, h('div', { class: 'panel__tipo' }, def.singular),
+          h('div', { class: 'panel__num' }, etiquetaNum(r)), r.numero ? h('div', { class: 'panel__folio' }, r.numero) : null),
+        h('button', { class: 'icono-btn', 'aria-label': 'Cerrar', onclick: cerrarPanel }, icono('cerrar'))),
+      h('div', { class: 'panel__acciones' }, acciones),
+      h('div', { class: 'panel__cuerpo' },
+        cancelado ? h('div', { class: 'cancelacion' }, h('strong', null, 'Cancelado. '), r.motivo_cancelacion || '') : null,
+        h('section', { class: 'seccion' }, h('h3', null, 'Datos'), datos),
+        h('section', { class: 'seccion' }, h('h3', null, 'Seguimiento'), seg, ligados ? h('div', { style: { marginTop: '10px' } }, ligados) : null),
+        h('section', { class: 'seccion' }, h('h3', null, 'Archivos'), archivos),
+        h('section', { class: 'seccion' }, h('h3', null, 'Historial'), hist),
+        previo ? null : h('div', { style: { fontSize: '12px', color: 'var(--texto-3)' } },
+          'Capturó ' + (r.creado_por || '—') + ' el ' + fechaCorta(r.creado_en) + ' · Última modificación: ' + (r.modificado_por || r.creado_por || '—') + ' ' + fechaCorta(r.modificado_en) +
+          (r.origen && r.origen !== 'App' ? ' · Origen: ' + r.origen : ''))));
+    function tecla(ev) {
+      if (pila.length) return;   // una ventana encima tiene el teclado
+      if (ev.key === 'Escape') cerrarPanel();
+      else atraparFoco(panelActual ? panelActual.panel : panel, ev);
+    }
+    if (mismo) {
+      // El mismo registro ya está abierto: se cambia el contenido en su lugar, sin volver a animar.
+      var viejo = panelActual.panel, cv = viejo.querySelector('.panel__cuerpo'), arriba = cv ? cv.scrollTop : 0;
+      var teniaFoco = viejo.contains(document.activeElement);
+      panel.style.animation = 'none';
+      viejo.replaceWith(panel);
+      if (teniaFoco) { var cb = panel.querySelector('.panel__cab .icono-btn'); if (cb) cb.focus(); }
+      var cn = panel.querySelector('.panel__cuerpo');
+      if (cn) cn.scrollTop = arriba;
+      document.removeEventListener('keydown', panelActual.tecla);
+      document.addEventListener('keydown', tecla);
+      panelActual.panel = panel; panelActual.tecla = tecla; panelActual.previo = !!previo;
+      return;
+    }
+    var anterior = document.activeElement;
+    document.addEventListener('keydown', tecla);
+    document.body.appendChild(velo);
+    document.body.appendChild(panel);
+    panelActual = { velo: velo, panel: panel, tecla: tecla, id: r.id, previo: !!previo, anterior: anterior };
+    var cerrarBtn = panel.querySelector('.panel__cab .icono-btn');
+    if (cerrarBtn) cerrarBtn.focus(); else panel.focus();
+  }
+
+  function bloqueArchivo(r, clase, titulo, tiene, nombre) {
+    var puede = puedeCapturar(r.tipo) && r.estatus !== 'Cancelado';
+    var listo = function (res) { trasCambio(res, r.id); cargarListaSiAplica(r.tipo); };
+    var input = h('input', { type: 'file', accept: '.pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png', class: 'oculto',
+      onchange: function () { var f = input.files[0]; input.value = ''; if (f) subirArchivo(r, clase, f).then(listo).catch(fallo); } });
+    // Cámara del celular: abre la cámara trasera; la foto se comprime antes de subir
+    var camara = inputFoto(function (f) { subirArchivo(r, clase, f, { foto: true }).then(listo).catch(fallo); });
+    var botonFoto = h('button', { class: 'btn btn--chico', onclick: function () { camara.click(); } }, icono('camara'), 'Tomar foto');
+    var botones = [];
+    if (tiene) {
+      botones.push(h('button', { class: 'btn btn--chico', onclick: function () { verArchivo(r, clase); } }, icono('bajar'), 'Abrir'));
+      if (puede) {
+        botones.push(h('button', { class: 'btn btn--chico btn--fantasma', onclick: function () { input.click(); } }, 'Reemplazar'));
+        botones.push(h('button', { class: 'btn btn--chico btn--fantasma', onclick: function () { camara.click(); } }, icono('camara'), 'Foto'));
+        botones.push(h('button', { class: 'icono-btn', title: 'Quitar', 'aria-label': 'Quitar archivo', onclick: function () {
+          confirmar('¿Quitar «' + nombre + '» de este registro?\nQueda 30 días en la papelera de Drive del dueño.', { si: 'Quitar', peligro: true }).then(function (s) {
+            if (s) llamar('quitarArchivo', { id: r.id, clase: clase }).then(function (res) { aviso('Archivo quitado.', 'ok'); trasCambio(res, r.id); cargarListaSiAplica(r.tipo); }).catch(fallo);
+          });
+        } }, icono('papelera')));
+      }
+    } else if (puede) {
+      botones.push(h('button', { class: 'btn btn--chico', onclick: function () { input.click(); } }, icono('subir'), 'Subir'));
+      botones.push(botonFoto);
+    }
+    return h('div', { class: 'archivo' + (tiene ? ' tiene' : '') }, h('div', { class: 'archivo__ico' }, icono(tiene ? 'archivo' : 'clip')),
+      h('div', { class: 'archivo__txt' }, h('strong', null, titulo), h('span', null, tiene ? nombre : 'Sin archivo · PDF, JPG o PNG hasta 10 MB')),
+      h('div', { class: 'archivo__botones' }, botones), input, camara);
+  }
+
+  /* ───────────────────────── Volante de recepción (media carta) ───────────────────────── */
+  // Se arma con h() (texto como texto) y se imprime con window.print(): funciona
+  // dentro de Google (el marco de Apps Script permite «allow-modals») y en Vercel
+  // (sin estilos en línea: el tamaño media carta está en Estilos.html, @page volante).
+  function hojaVolante(r) {
+    var t = r.tipo, def = tipoDef(t), enc = E.ini.config.encabezados || [];
+    var hora = r.origen === 'App' && String(r.creado_en).slice(0, 10) === String(r.fecha_recepcion || '') ? String(r.creado_en).slice(11, 16) : '';
+    var renglon = function (et, valor, o) {
+      o = o || {};
+      return h('div', { class: 'vol__f' + (o.ancho ? ' vol__f--ancho' : '') + (o.alto ? ' vol__f--alto' : '') },
+        h('span', { class: 'vol__et' }, et), h('span', { class: 'vol__v' + (valor ? '' : ' vol__v--vacio') }, valor || ''));
+    };
+    var turnado = [r.turnado_nombre || '', r.turnado_a || ''].filter(Boolean).join(' · ');
+    var ahora = new Date();
+    return h('div', { class: 'vol' },
+      h('header', { class: 'vol__cab' }, h('img', { class: 'vol__logo', src: LOGO, alt: '', width: 56, height: 56 }),
+        h('div', { class: 'vol__inst' }, enc.map(function (x, i) { return h('div', { class: i === 0 ? 'vol__inst1' : '' }, x); }))),
+      h('div', { class: 'vol__titulo' }, h('strong', null, 'Volante de recepción'), h('span', null, def.singular)),
+      h('div', { class: 'vol__nums' },
+        h('div', { class: 'vol__num' }, h('span', { class: 'vol__et' }, 'No. de control'), h('strong', null, t + ' ' + etiquetaNum(r))),
+        h('div', { class: 'vol__num' }, h('span', { class: 'vol__et' }, etiquetaCampo(t, 'numero', 'No. de oficio')), h('strong', null, r.numero || '—'))),
+      h('div', { class: 'vol__datos' },
+        renglon('Fecha de recepción', fechaCorta(r.fecha_recepcion)),
+        renglon('Hora de recepción', hora),
+        renglon(etiquetaCampo(t, 'firma', 'Remitente'), [lineas(r.firma).primera, lineas(r.firma).resto].filter(Boolean).join(' · ') || (r.area || ''), { ancho: true }),
+        renglon('Dirigido a', lineas(r.dirigido_a).primera, { ancho: true }),
+        renglon('Asunto', r.asunto, { ancho: true, alto: true }),
+        renglon('Turnado a', turnado, { ancho: true }),
+        renglon('Fecha límite', fechaCorta(r.fecha_limite)),
+        renglon(etiquetaCampo(t, 'elaboro', 'Recibió'), r.elaboro),
+        renglon('Observaciones', r.observaciones, { ancho: true, alto: true })),
+      h('div', { class: 'vol__firmas' },
+        h('div', { class: 'vol__firma' }, h('div', { class: 'vol__linea' }), h('span', null, 'Recibió · nombre y firma')),
+        h('div', { class: 'vol__firma' }, h('div', { class: 'vol__linea' }), h('span', null, 'Turnado a · nombre, firma y fecha')),
+        h('div', { class: 'vol__sello' }, h('span', null, 'Sello de recibido'))),
+      h('footer', { class: 'vol__pie' }, 'Control de Gestión · impreso el ' + fechaCorta(hoyIso()) + ' ' + ('0' + ahora.getHours()).slice(-2) + ':' + ('0' + ahora.getMinutes()).slice(-2) + ' por ' + E.ini.yo.nombre));
+  }
+
+  function verVolante(r) {
+    var v = ventana({ titulo: 'Volante de recepción · ' + etiquetaNum(r), ancho: 640, sinFoco: true,
+      cuerpo: [h('p', { class: 'campo__ayuda', style: { margin: 0 } }, 'Tamaño media carta (14 × 21.6 cm). Al imprimir, elige la impresora y «Tamaño real» o «100 %».'),
+        h('div', { class: 'vol-previa' }, hojaVolante(r))],
+      pie: [h('button', { class: 'btn', onclick: function () { v.cerrar(); } }, 'Cerrar'),
+        h('button', { class: 'btn btn--prim', onclick: function () { imprimirVolante(r); } }, icono('imprimir'), 'Imprimir')] });
+  }
+
+  function imprimirVolante(r) {
+    var cont = h('div', { class: 'impresion', 'aria-hidden': 'true' }, hojaVolante(r));
+    document.body.appendChild(cont);
+    document.body.classList.add('imprimiendo');
+    var limpio = false;
+    var limpiar = function () {
+      if (limpio) return;
+      limpio = true;
+      cont.remove();
+      document.body.classList.remove('imprimiendo');
+      window.removeEventListener('afterprint', limpiar);
+    };
+    window.addEventListener('afterprint', limpiar);
+    try {
+      window.print();
+    } catch (e) {
+      aviso('El navegador no dejó abrir la impresión. Usa Ctrl+P (o Compartir → Imprimir en el celular).', 'error');
+    }
+    setTimeout(limpiar, 60000);   // por si el navegador no avisa que terminó
+  }
+
+  /* ───────────────────────── Fotos con la cámara ───────────────────────── */
+  // capture="environment" abre la cámara trasera en el celular (en computadora,
+  // el selector de imágenes). No usa getUserMedia: por eso no hace falta
+  // relajar Permissions-Policy (camera=()) ni la CSP de vercel.json.
+  var FOTO_LADO = 2000, FOTO_CALIDAD = 0.8, MAX_BYTES = 10 * 1024 * 1024;
+  function inputFoto(alElegir) {
+    var i = h('input', { type: 'file', accept: 'image/*', capture: 'environment', class: 'oculto', 'aria-hidden': 'true', tabindex: '-1',
+      onchange: function () { var f = i.files[0]; i.value = ''; if (f) alElegir(f); } });
+    return i;
+  }
+  function tamano(b) { return b >= 1048576 ? (b / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(b / 1024)) + ' KB'; }
+  function nombreFoto() {
+    var d = new Date(), z = function (n) { return ('0' + n).slice(-2); };
+    return 'foto-' + hoyIso() + '-' + z(d.getHours()) + z(d.getMinutes()) + z(d.getSeconds()) + '.jpg';
+  }
+  /** Reduce la foto en el navegador: lado mayor de 2000 px y JPEG al 80 % (baja la calidad si aún pesa más de 10 MB). */
+  function comprimirFoto(f) {
+    return new Promise(function (ok, mal) {
+      var url = URL.createObjectURL(f);
+      var img = new Image();
+      img.onload = function () {
+        try {
+          var k = Math.min(1, FOTO_LADO / Math.max(img.naturalWidth, img.naturalHeight));
+          var lienzo = document.createElement('canvas');
+          lienzo.width = Math.max(1, Math.round(img.naturalWidth * k));
+          lienzo.height = Math.max(1, Math.round(img.naturalHeight * k));
+          var g = lienzo.getContext('2d');
+          g.fillStyle = '#fff'; g.fillRect(0, 0, lienzo.width, lienzo.height);   // PNG con transparencia: fondo blanco
+          g.drawImage(img, 0, 0, lienzo.width, lienzo.height);
+          URL.revokeObjectURL(url);
+          var intentar = function (q) {
+            lienzo.toBlob(function (b) {
+              if (!b) return mal(new Error('No se pudo preparar la foto. Intenta de nuevo.'));
+              if (b.size > MAX_BYTES - 64 * 1024 && q > 0.45) return intentar(Math.round((q - 0.15) * 100) / 100);
+              if (b.size > MAX_BYTES) return mal(new Error('La foto sigue pesando más de 10 MB. Tómala con menos resolución.'));
+              var nombre = nombreFoto();
+              var archivo;
+              try { archivo = new File([b], nombre, { type: 'image/jpeg' }); } catch (e) { archivo = b; archivo.name = nombre; }
+              archivo.ancho = lienzo.width; archivo.alto = lienzo.height;
+              ok(archivo);
+            }, 'image/jpeg', q);
+          };
+          intentar(FOTO_CALIDAD);
+        } catch (e) { mal(new Error('No se pudo preparar la foto: ' + e.message)); }
+      };
+      img.onerror = function () { URL.revokeObjectURL(url); mal(new Error('No se pudo leer la imagen. Si es una foto HEIC, cámbiala a JPG o súbela como archivo.')); };
+      img.src = url;
+    });
+  }
+  /** Elegir un archivo o tomar una foto (en el formulario de alta). */
+  function selectorArchivo(etiqueta) {
+    var elegido = null;
+    var info = h('span', { class: 'selarch__nombre' }, 'Ningún archivo');
+    var quitar = h('button', { type: 'button', class: 'icono-btn oculto', 'aria-label': 'Quitar archivo', title: 'Quitar', onclick: function () { poner(null); } }, icono('cerrar'));
+    var normal = h('input', { type: 'file', class: 'oculto', accept: '.pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png',
+      onchange: function () { var f = normal.files[0]; normal.value = ''; if (f) poner(f); } });
+    var foto = inputFoto(function (f) {
+      info.textContent = 'Preparando la foto…';
+      comprimirFoto(f).then(poner).catch(function (e) { poner(elegido); fallo(e); });
+    });
+    function poner(f) {
+      elegido = f || null;
+      info.textContent = f ? (f.name || 'archivo') + ' · ' + tamano(f.size) : 'Ningún archivo';
+      quitar.classList.toggle('oculto', !f);
+    }
+    var el = h('div', { class: 'campo' }, h('span', { class: 'campo__et' }, etiqueta),
+      h('div', { class: 'selarch' },
+        h('button', { type: 'button', class: 'btn btn--chico', onclick: function () { normal.click(); } }, icono('subir'), 'Elegir archivo'),
+        h('button', { type: 'button', class: 'btn btn--chico', onclick: function () { foto.click(); } }, icono('camara'), 'Tomar foto')),
+      h('div', { class: 'selarch__fila' }, info, quitar), normal, foto);
+    return { el: el, archivo: function () { return elegido; } };
+  }
+
+  function leerArchivo(f) {
+    return new Promise(function (ok, mal) {
+      var tipos = { 'application/pdf': 1, 'image/jpeg': 1, 'image/png': 1 };
+      var mime = f.type || (/\.pdf$/i.test(f.name) ? 'application/pdf' : /\.png$/i.test(f.name) ? 'image/png' : /\.jpe?g$/i.test(f.name) ? 'image/jpeg' : '');
+      if (!tipos[mime]) return mal(new Error('Solo se aceptan PDF, JPG o PNG.'));
+      if (f.size > 10 * 1024 * 1024) return mal(new Error('El archivo pesa ' + (f.size / 1048576).toFixed(1) + ' MB; el máximo es 10 MB.'));
+      var lector = new FileReader();
+      lector.onload = function () { ok({ nombre: f.name, mime: mime, base64: String(lector.result).split(',')[1] }); };
+      lector.onerror = function () { mal(new Error('No se pudo leer el archivo.')); };
+      lector.readAsDataURL(f);
+    });
+  }
+
+  function subirArchivo(r, clase, f, o) {
+    o = o || {};
+    var esImagen = /^image\//.test(f.type || '') && f.type !== 'image/svg+xml';
+    var preparar = Promise.resolve(f);
+    if (o.foto || (esImagen && f.size > MAX_BYTES)) {
+      aviso('Preparando la foto…');
+      preparar = comprimirFoto(f);
+    }
+    return preparar.then(leerArchivo).then(function (a) {
+      aviso('Subiendo ' + a.nombre + '…');
+      return llamar('subirArchivo', { id: r.id, clase: clase, nombre: a.nombre, mime: a.mime, base64: a.base64 });
+    }).then(function (res) { aviso('Archivo guardado.', 'ok'); return res; });
+  }
+
+  /**
+   * «Abrir» un escaneo: se ve aquí mismo (imagen, o PDF en computadora) con
+   * «Descargar» a la mano. En celular, el PDF se abre en otra pestaña o se
+   * descarga (el visor de PDF del celular no funciona dentro de la página).
+   * La ventana se abre al tocar (antes de que llegue el archivo) para que el
+   * navegador deje abrir la pestaña nueva.
+   */
+  function verArchivo(r, clase) {
+    var cuerpo = h('div', { class: 'previa' }, h('p', { class: 'previa__cargando' }, 'Trayendo el archivo…'));
+    var pie = h('div', { class: 'previa__pie' });
+    var url = null;
+    var v = ventana({ titulo: (clase === 'acuse' ? (r.tipo === 'OFE' ? 'Oficio original / acuse' : 'Acuse') : 'Documento') + ' · ' + etiquetaNum(r), ancho: 900, sinFoco: true,
+      cuerpo: cuerpo, pie: pie, alCerrar: function () { if (url) setTimeout(function () { URL.revokeObjectURL(url); }, 1000); } });
+    llamar('descargarArchivo', { id: r.id, clase: clase }).then(function (a) {
+      var bytes = b64aBytes(a.base64);
+      url = URL.createObjectURL(new Blob([bytes], { type: a.mime }));
+      vaciar(cuerpo);
+      var esPdf = a.mime === 'application/pdf';
+      if (!esPdf) {
+        cuerpo.appendChild(h('img', { class: 'previa__img', src: url, alt: a.nombre }));
+      } else if (usaHistorial && !esCelular()) {
+        cuerpo.appendChild(h('iframe', { class: 'previa__pdf', src: url, title: a.nombre }));
+      } else {
+        cuerpo.appendChild(h('div', { class: 'previa__aviso' }, icono('archivo'), h('div', null, h('strong', null, a.nombre), h('span', null, 'PDF · ' + tamano(bytes.length)))));
+      }
+      vaciar(pie).appendChild(h('span', { class: 'previa__nombre' }, a.nombre));
+      if (esPdf) pie.appendChild(h('button', { class: 'btn', onclick: function () { var w = window.open(url, '_blank', 'noopener'); if (!w) aviso('El navegador no dejó abrir otra pestaña: usa «Descargar».'); } }, icono('flecha'), 'Abrir en otra pestaña'));
+      pie.appendChild(h('button', { class: 'btn btn--prim', onclick: function () { descargarBytes(bytes, a.nombre, a.mime); } }, icono('bajar'), 'Descargar'));
+    }).catch(function (e) { v.cerrar(); fallo(e); });
+  }
+
+  /** Borrador del oficio en Word, a partir de la plantilla de Google Docs (Configuración). */
+  function generarOficio(r, boton) {
+    if (boton) boton.disabled = true;
+    aviso('Preparando el borrador…');
+    llamar('generarOficio', { id: r.id }).then(function (a) {
+      descargarBytes(b64aBytes(a.base64), a.nombre, a.mime);
+    }).catch(fallo).then(function () { if (boton) boton.disabled = false; });
+  }
+
+  function cargarListaSiAplica(t) { if (E.vista === 'libreta' && E.tipo === t) cargarLista({ silencioso: true }); }
+
+  function cancelarRegistro(r) {
+    var motivo = h('textarea', { class: 'entrada', rows: 3, maxlength: 500, placeholder: 'Ej.: se capturó dos veces; el oficio no se envió…' });
+    var v = ventana({ titulo: 'Cancelar ' + tipoDef(r.tipo).singular.toLowerCase() + ' ' + etiquetaNum(r), ancho: 480, cuidar: true,
+      cuerpo: [h('div', { class: 'alerta alerta--aviso' }, 'El registro no se borra: queda marcado como cancelado y su número no se vuelve a usar.'), campo('Motivo', motivo, { req: true })],
+      pie: [h('button', { class: 'btn', onclick: function () { v.cerrar(); } }, 'No cancelar'),
+        h('button', { class: 'btn btn--peligro-lleno', onclick: function () {
+          var b = this;
+          b.disabled = true;
+          llamar('cancelar', { id: r.id, version: r.version, motivo: motivo.value }).then(function (res) {
+            v.cerrar(); aviso('Registro cancelado.', 'ok'); trasCambio(res, r.id); cargarListaSiAplica(r.tipo);
+          }).catch(function (e) { b.disabled = false; fallo(e); });
+        } }, 'Cancelar registro')] });
+  }
+
+  /**
+   * «Duplicar»: abre el formulario de alta con los datos de este registro.
+   * NO se copian: número, archivos, estatus, cancelación, historial, acuse,
+   * relación ni fechas (el registro nuevo es otro documento: lleva fechas propias).
+   */
+  var CAMPOS_COPIA = ['asunto', 'dirigido_id', 'dirigido_a', 'firma_id', 'firma', 'area', 'elaboro', 'carpeta', 'observaciones', 'turnado_a', 'turnado_usuario'];
+  function duplicar(r) {
+    cerrarPanel();
+    var pre = {};
+    CAMPOS_COPIA.forEach(function (k) { if (r[k] !== undefined && r[k] !== null && r[k] !== '') pre[k] = r[k]; });
+    formulario(r.tipo, null, { prefill: pre, copia: r });
+  }
+
+  function responder(orig) {
+    cerrarPanel();
+    formulario('OFS', null, { prefill: {
+      relacionado_id: orig.id,
+      dirigido_id: orig.firma_id, dirigido_a: orig.firma,
+      asunto: 'Respuesta ' + (orig.numero ? 'al oficio ' + orig.numero : 'a ' + tipoDef(orig.tipo).singular.toLowerCase() + ' ' + etiquetaNum(orig)) + (orig.asunto ? ': ' + orig.asunto : '')
+    }, original: orig });
+  }
+</script>

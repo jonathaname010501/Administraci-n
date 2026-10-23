@@ -27,7 +27,7 @@ function preparar({ conBase = true } = {}) {
   const r1 = e.api(null, "entrar", { usuario: m[1], clave: m[2] });
   assert.equal(r1.ok, true, JSON.stringify(r1));
   assert.equal(r1.datos.debe_cambiar, true);
-  const r2 = e.api(r1.datos.token, "cambiarClave", { actual: m[2], nueva: "Gestion2026" });
+  const r2 = e.api(r1.datos.token, "cambiarClave", { actual: m[2], nueva: "Jacaranda2026x" });
   assert.equal(r2.ok, true, JSON.stringify(r2));
   e.admin = r2.datos.token;
   e.salidaInstalar = salida;
@@ -38,7 +38,7 @@ function alta(e, usuario, rol, tipos) {
   const r = e.api(e.admin, "guardarUsuario", { nuevo: true, usuario, nombre: "Persona " + usuario, rol, tipos });
   assert.equal(r.ok, true, JSON.stringify(r));
   const r1 = e.api(null, "entrar", { usuario, clave: r.datos.temporal });
-  const r2 = e.api(r1.datos.token, "cambiarClave", { actual: r.datos.temporal, nueva: "Minutario2026x" });
+  const r2 = e.api(r1.datos.token, "cambiarClave", { actual: r.datos.temporal, nueva: "Ahuehuete2026x" });
   assert.equal(r2.ok, true, JSON.stringify(r2));
   return r2.datos.token;
 }
@@ -50,7 +50,8 @@ const nuevoOficio = (extra = {}) => ({ tipo: "OFS", asunto: "Solicitud de apoyo 
 test("solo estas funciones se pueden llamar desde el navegador", () => {
   const e = crearEntorno();
   const publicas = e.funcionesDeclaradas.filter((f) => !f.endsWith("_")).sort();
-  assert.deepEqual(publicas, ["api", "doGet", "doPost", "instalar", "respaldoSemanal", "restablecerAdministrador", "revisarSeguridad"]);
+  assert.deepEqual(publicas, ["api", "avisosDiarios", "doGet", "doPost", "instalar", "respaldoDiario", "respaldoSemanal",
+    "restablecerAdministrador", "revisarRespaldos", "revisarSeguridad"]);
   assert.throws(() => e.run("tabla_", "Usuarios"), /no es una función pública/);
   assert.throws(() => e.run("hashClave_", "x"), /no es una función pública/);
 });
@@ -96,11 +97,12 @@ testBase("con dirección pública configurada, la URL de Google solo muestra un 
 testBase("instalar: crea pestañas, carpetas privadas, respaldo y admin; es repetible", () => {
   const e = preparar();
   for (const h of ["Registros", "Directorio", "Usuarios", "Bitacora", "Config"]) assert.ok(e.hoja(h), h);
-  assert.equal(e.disparadores.length, 1);
+  assert.deepEqual(e.disparadores.map((d) => d.fn).sort(), ["avisosDiarios", "respaldoDiario"]);
+  assert.ok(e.disparadores.every((d) => d.cadaDias === 1), "los dos son diarios");
   assert.match(e.salidaInstalar, /La hoja de la base: privada/);
   assert.match(e.salidaInstalar, /Todo en orden/);
   const otra = e.comoDueno("instalar");
-  assert.equal(e.disparadores.length, 1, "no duplica el disparador");
+  assert.equal(e.disparadores.length, 2, "no duplica los disparadores");
   assert.match(otra, /Administradores activos: admin/);
   assert.doesNotMatch(otra, /Contraseña temporal/);
   assert.equal(e.hoja("Registros").getLastRow(), 733, "no tocó los registros migrados");
@@ -111,19 +113,41 @@ testBase("las funciones del dueño no se pueden usar desde la app web", () => {
   for (const fn of ["instalar", "restablecerAdministrador", "revisarSeguridad"]) {
     assert.throws(() => e.run(fn), /Solo lo puede correr el dueño|solo lo puede correr el dueño/i, fn);
   }
-  // respaldoSemanal es pública pero inofensiva: una copia por semana
-  assert.match(e.run("respaldoSemanal"), /Respaldo Control de Gestión/);
+  // respaldoDiario (y respaldoSemanal, el nombre anterior) son públicas pero inofensivas: una copia por día
+  assert.match(e.run("respaldoDiario"), /Respaldo Control de Gestión/);
+  assert.match(e.run("respaldoDiario"), /Ya hay respaldo/);
   assert.match(e.run("respaldoSemanal"), /Ya hay respaldo/);
+  // avisosDiarios desde la app web no hace nada (solo con su disparador)
+  assert.match(e.run("avisosDiarios"), /la corre su disparador/);
+  assert.match(e.run("avisosDiarios", { triggerUid: "inventado" }), /la corre su disparador/);
+  assert.throws(() => e.run("revisarRespaldos"), /solo lo puede correr el dueño/i);
 });
 
-test("contraseñas: PBKDF2 estándar (igual que el de Node)", () => {
+test("contraseñas: PBKDF2 estándar con pimienta (la pimienta no está en la hoja)", () => {
   const e = crearEntorno();
-  const h = e.ctx.hashClave_("Gestion2026", Buffer.from("0123456789abcdef").toString("base64"), 1000);
-  const esperado = crypto.pbkdf2Sync("Gestion2026", Buffer.from("0123456789abcdef"), 1000, 32, "sha256").toString("base64");
-  assert.equal(h.split("$")[3], esperado);
-  assert.equal(e.ctx.verificarClave_("Gestion2026", h), true);
-  assert.equal(e.ctx.verificarClave_("gestion2026", h), false);
+  const sal = Buffer.from("0123456789abcdef");
+  const firmados = (buf) => [...buf].map((b) => (b > 127 ? b - 256 : b));
+  // el PBKDF2 de Apps Script es el estándar (igual al de Node)
+  const dk = e.ctx.pbkdf2_(firmados(Buffer.from("Jacaranda2026x")), firmados(sal), 1000);
+  assert.equal(Buffer.from(dk.map((b) => b & 255)).toString("base64"), crypto.pbkdf2Sync("Jacaranda2026x", sal, 1000, 32, "sha256").toString("base64"));
+  // con pimienta: PBKDF2(HMAC-SHA256(pimienta, contraseña))
+  const h = e.ctx.hashClave_("Jacaranda2026x", sal.toString("base64"), 1000);
+  const pimienta = Buffer.from(e.props.get("PIMIENTA"), "base64");
+  const conPimienta = crypto.createHmac("sha256", pimienta).update("Jacaranda2026x").digest();
+  assert.match(h, /^pbkdf2p\$1000\$/);
+  assert.equal(h.split("$")[3], crypto.pbkdf2Sync(conPimienta, sal, 1000, 32, "sha256").toString("base64"));
+  assert.equal(e.ctx.verificarClave_("Jacaranda2026x", h), true);
+  assert.equal(e.ctx.verificarClave_("jacaranda2026x", h), false);
   assert.notEqual(e.ctx.hashClave_("igual1234").split("$")[2], e.ctx.hashClave_("igual1234").split("$")[2], "sal distinta cada vez");
+  // el formato anterior (sin pimienta) sigue sirviendo para entrar, y se marca para cifrarlo otra vez
+  const viejo = "pbkdf2$1000$" + sal.toString("base64") + "$" + crypto.pbkdf2Sync("Jacaranda2026x", sal, 1000, 32, "sha256").toString("base64");
+  assert.equal(e.ctx.verificarClave_("Jacaranda2026x", viejo), true);
+  assert.equal(e.ctx.necesitaRecifrar_(viejo), true);
+  assert.equal(e.ctx.necesitaRecifrar_(h), false);
+  // sin la pimienta correcta, el hash no sirve
+  e.props.set("PIMIENTA", Buffer.alloc(32, 7).toString("base64"));
+  e.ctx.nuevaPeticion_();
+  assert.equal(e.ctx.verificarClave_("Jacaranda2026x", h), false);
 });
 
 testBase("entrar: mismo mensaje con usuario inexistente; bloqueo tras 5 fallas", () => {
@@ -132,12 +156,12 @@ testBase("entrar: mismo mensaje con usuario inexistente; bloqueo tras 5 fallas",
   const b = e.api(null, "entrar", { usuario: "admin", clave: "mala" });
   assert.equal(a.error, b.error);
   for (let i = 0; i < 4; i++) e.api(null, "entrar", { usuario: "admin", clave: "mala" });
-  const c = e.api(null, "entrar", { usuario: "admin", clave: "Gestion2026" });
+  const c = e.api(null, "entrar", { usuario: "admin", clave: "Jacaranda2026x" });
   assert.equal(c.codigo, "BLOQUEADO", "con la buena ya no entra mientras está bloqueado");
   e.reloj.offset += 16 * 60 * 1000;
-  assert.equal(e.api(null, "entrar", { usuario: "admin", clave: "Gestion2026" }).ok, true, "a los 15 min se desbloquea");
+  assert.equal(e.api(null, "entrar", { usuario: "admin", clave: "Jacaranda2026x" }).ok, true, "a los 15 min se desbloquea");
   const usuarios = e.hoja("Usuarios").datos.map((f) => f.join("|")).join("\n");
-  assert.doesNotMatch(usuarios, /Gestion2026/, "la contraseña nunca queda en claro");
+  assert.doesNotMatch(usuarios, /Jacaranda2026x/, "la contraseña nunca queda en claro");
 });
 
 testBase("sesión: token falso, contraseña temporal, desactivación y cambio de permisos", () => {
@@ -149,15 +173,15 @@ testBase("sesión: token falso, contraseña temporal, desactivación y cambio de
   assert.equal(e.api(t, "inicio").codigo, "CAMBIAR_CLAVE", "con temporal no puede hacer nada más");
   assert.equal(e.api(t, "cambiarClave", { actual: r.datos.temporal, nueva: "corta" }).codigo, "DATOS");
   assert.equal(e.api(t, "cambiarClave", { actual: r.datos.temporal, nueva: "ana.perez123" }).codigo, "DATOS", "no puede contener el usuario");
-  const t2 = e.api(t, "cambiarClave", { actual: r.datos.temporal, nueva: "Oficios2026" }).datos.token;
+  const t2 = e.api(t, "cambiarClave", { actual: r.datos.temporal, nueva: "Tejocote2026x" }).datos.token;
   assert.equal(e.api(t, "inicio").codigo, "SESION", "la sesión vieja muere al cambiar contraseña");
   assert.equal(e.api(t2, "inicio").ok, true);
   e.api(e.admin, "guardarUsuario", { usuario: "ana.perez", nombre: "Ana Pérez", rol: "captura", tipos: ["OFE", "OFS"] });
   assert.equal(e.api(t2, "inicio").codigo, "SESION", "cambio de permisos = volver a entrar");
-  const t3 = e.api(null, "entrar", { usuario: "ana.perez", clave: "Oficios2026" }).datos.token;
+  const t3 = e.api(null, "entrar", { usuario: "ana.perez", clave: "Tejocote2026x" }).datos.token;
   e.api(e.admin, "guardarUsuario", { usuario: "ana.perez", nombre: "Ana Pérez", rol: "captura", tipos: ["OFE"], activo: "NO" });
   assert.equal(e.api(t3, "inicio").codigo, "SESION");
-  assert.equal(e.api(null, "entrar", { usuario: "ana.perez", clave: "Oficios2026" }).codigo, "INACTIVO");
+  assert.equal(e.api(null, "entrar", { usuario: "ana.perez", clave: "Tejocote2026x" }).codigo, "INACTIVO");
   e.reloj.offset += 4 * 3600 * 1000;
   assert.equal(e.api(e.admin, "inicio").codigo, "SESION", "3 h sin actividad cierran la sesión");
 });
@@ -448,6 +472,8 @@ test("armar-web: arma dist/ para Vercel sin código en línea y exige la URL del
   assert.match(csp, /connect-src https:\/\/script\.google\.com https:\/\/script\.googleusercontent\.com;/);
   assert.match(csp, /frame-ancestors 'none'/);
   assert.match(csp, /manifest-src 'self'/);
+  assert.match(csp, /frame-src blob:; object-src blob:;/, "los PDF se ven en la página (iframe con blob:)");
+  assert.doesNotMatch(csp, /frame-src[^;]*(https?:|\*)/, "solo blob: en marcos");
   const man = JSON.parse(fs.readFileSync(path.join(raiz, "dist", "manifest.webmanifest"), "utf8"));
   assert.equal(man.name, "Control de Gestión");
   assert.deepEqual(man.icons.map((i) => i.sizes), ["192x192", "512x512", "512x512"]);

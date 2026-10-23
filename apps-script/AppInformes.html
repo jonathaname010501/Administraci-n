@@ -1,0 +1,542 @@
+<script>
+  /* Control de Gestión · Excel, Exportación, Pendientes, Mis asuntos e Informes. Es una parte de la app: se junta con las demás App*.html (ver FRAGMENTOS_APP en Servidor.gs). */
+  /* ───────────────────────── Excel ───────────────────────── */
+  var ANCHOS = { numero: 24, dirigido: 34, asunto: 48, fecha: 12, fecha_recepcion: 12, firma: 34, elaboro: 16, acuse: 9, carpeta: 9, area: 30, observaciones: 44 };
+  /** Arma y descarga el Excel con las filas que mandó el servidor (una hoja por libreta). */
+  function descargarExcel(res, tipos, periodo, nombreArchivo) {
+    var ahora = new Date();
+    var cuando = fechaCorta(hoyIso()) + ' ' + ('0' + ahora.getHours()).slice(-2) + ':' + ('0' + ahora.getMinutes()).slice(-2);
+    var hojas = tipos.map(function (t) {
+      var def = tipoDef(t);
+      var filas = res.filas.filter(function (r) { return r.tipo === t; }).sort(function (a, b) {
+        return (a.anio - b.anio) || (a.consecutivo - b.consecutivo) || (a.sufijo > b.sufijo ? 1 : -1);
+      });
+      var varios = filas.some(function (r) { return r.anio !== (filas[0] || {}).anio; });
+      var enc = ['Núm. consecutivo'], tiposCol = ['centro'], anchos = [11],
+        extractores = [function (r) { return pad3(r.consecutivo) + (r.sufijo ? ' ' + r.sufijo : '') + (varios ? '/' + r.anio : ''); }];
+      if (def.numeroAuto) { enc.push('No. de oficio'); tiposCol.push('texto'); anchos.push(24); extractores.push(function (r) { return r.numero; }); }
+      def.campos.forEach(function (c) {
+        var k = c[0];
+        enc.push(c[1]); anchos.push(ANCHOS[k] || 16);
+        tiposCol.push(k === 'fecha' || k === 'fecha_recepcion' ? 'fecha' : k === 'acuse' || k === 'carpeta' ? 'centro' : 'texto');
+        extractores.push(function (r) {
+          if (k === 'dirigido') return r.dirigido_a;
+          if (k === 'acuse') return r.acuse === 'SI' ? 'Sí' : '';
+          return r[k];
+        });
+      });
+      [['Estatus', 13, 'centro', function (r) { return r.estatus + (r.estatus === 'Cancelado' && r.motivo_cancelacion ? ': ' + r.motivo_cancelacion : ''); }],
+        ['Fecha límite', 12, 'fecha', function (r) { return r.fecha_limite; }],
+        ['Turnado a', 24, 'texto', function (r) { return r.turnado_a; }],
+        ['Responsable en el sistema', 18, 'texto', function (r) { return r.turnado_usuario || ''; }],
+        ['Fecha de atención', 12, 'fecha', function (r) { return r.fecha_atencion || ''; }]].forEach(function (x) { enc.push(x[0]); anchos.push(x[1]); tiposCol.push(x[2]); extractores.push(x[3]); });
+      return {
+        nombre: def.nombre,
+        titulos: (E.ini.config.encabezados || []).concat(['Control de Gestión · ' + def.nombre + ' · ' + periodo,
+          filas.length + ' registros · generado el ' + cuando + ' por ' + E.ini.yo.nombre]),
+        encabezados: enc, anchos: anchos, tipos: tiposCol,
+        filas: filas.map(function (r) { return extractores.map(function (f) { return f(r); }); }),
+        pie: 'Fuente: Control de Gestión. Fecha considerada: la de recibido; si no tiene, la del documento. Los cancelados conservan su número y muestran el motivo en «Estatus».'
+      };
+    });
+    descargarBytes(ExcelCG.libro(hojas), nombreArchivo, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  }
+
+  /* ───────────────────────── Exportación (solo administradores) ───────────────────────── */
+  vistas.exportacion = function () {
+    var cont = marco('exportacion');
+    var hoy = hoyIso(), anioHoy = Number(hoy.slice(0, 4)), mes = hoy.slice(0, 7);
+    var finDeMes = function (aaaa, mm) { return new Date(aaaa, mm, 0).getDate(); };
+    var mesPasado = (function () { var d = new Date(anioHoy, Number(hoy.slice(5, 7)) - 2, 1); return { a: d.getFullYear(), m: d.getMonth() + 1 }; })();
+    var dos = function (n) { return ('0' + n).slice(-2); };
+    var RANGOS = [
+      ['Este mes', mes + '-01', hoy],
+      ['Mes pasado', mesPasado.a + '-' + dos(mesPasado.m) + '-01', mesPasado.a + '-' + dos(mesPasado.m) + '-' + finDeMes(mesPasado.a, mesPasado.m)],
+      ['Este año', anioHoy + '-01-01', hoy],
+      ['Año pasado', (anioHoy - 1) + '-01-01', (anioHoy - 1) + '-12-31'],
+      ['Todo', '', '']
+    ];
+    var libreta = h('select', { class: 'entrada' }, [h('option', { value: 'TODOS' }, 'Todas las libretas')].concat(E.ini.orden.map(function (t) {
+      return h('option', { value: t }, tipoDef(t).nombre);
+    })));
+    var desde = h('input', { class: 'entrada', type: 'date', value: anioHoy + '-01-01', min: '2000-01-01', max: '2100-12-31' });
+    var hasta = h('input', { class: 'entrada', type: 'date', value: hoy, min: '2000-01-01', max: '2100-12-31' });
+    var botonesRango = RANGOS.map(function (r) {
+      return h('button', { type: 'button', class: 'btn btn--chico' + (r[0] === 'Este año' ? ' activo' : ''), onclick: function () {
+        desde.value = r[1]; hasta.value = r[2]; marcar(this); previa();
+      } }, r[0]);
+    });
+    function marcar(b) { botonesRango.forEach(function (x) { x.classList.toggle('activo', x === b); }); }
+    var resumen = h('div', { class: 'expo__resumen' }, 'Calculando…');
+    var boton = h('button', { class: 'btn btn--prim', style: { minHeight: '46px' } }, icono('bajar'), 'Descargar Excel');
+    var turno = 0;
+    function periodoTxt() {
+      if (!desde.value && !hasta.value) return 'Todos los registros';
+      return 'Del ' + (desde.value ? fechaCorta(desde.value) : 'inicio') + ' al ' + (hasta.value ? fechaCorta(hasta.value) : fechaCorta(hoy));
+    }
+    function datos() { return { tipo: libreta.value, desde: desde.value, hasta: hasta.value }; }
+    function previa() {
+      var mio = ++turno;
+      vaciar(resumen).appendChild(document.createTextNode('Calculando…'));
+      boton.disabled = true;
+      var d = datos(); d.soloConteo = true;
+      llamar('exportar', d).then(function (r) {
+        if (mio !== turno) return;
+        vaciar(resumen);
+        resumen.appendChild(h('div', { class: 'expo__total' }, r.total + (r.total === 1 ? ' registro' : ' registros')));
+        resumen.appendChild(h('div', null, periodoTxt() + ' · ' + (libreta.value === 'TODOS' ? 'todas las libretas' : tipoDef(libreta.value).nombre)));
+        var tipos = libreta.value === 'TODOS' ? E.ini.orden : [libreta.value];
+        resumen.appendChild(h('div', { class: 'expo__lista' }, tipos.map(function (t) {
+          return h('span', { class: 'etq' }, tipoDef(t).nombre + ': ' + (r.porTipo[t] || 0));
+        })));
+        if (r.sinFecha) resumen.appendChild(h('div', { class: 'expo__nota' }, r.sinFecha + ' registro' + (r.sinFecha === 1 ? '' : 's') + ' sin fecha no entra' + (r.sinFecha === 1 ? '' : 'n') + ' al filtrar por fechas (elige «Todo» para incluirlos).'));
+        boton.disabled = !r.total;
+      }).catch(function (e) { if (mio === turno) { vaciar(resumen).appendChild(h('div', { class: 'alerta alerta--error' }, e.message)); } });
+    }
+    [libreta].forEach(function (x) { x.addEventListener('change', previa); });
+    [desde, hasta].forEach(function (x) { x.addEventListener('change', function () { marcar(null); previa(); }); });
+    boton.addEventListener('click', function () {
+      boton.disabled = true;
+      var d = datos();
+      llamar('exportar', d).then(function (res) {
+        var tipos = d.tipo === 'TODOS' ? E.ini.orden : [d.tipo];
+        var rango = !d.desde && !d.hasta ? 'todo' : (d.desde || 'inicio') + ' a ' + (d.hasta || hoy);
+        descargarExcel(res, tipos, periodoTxt(), 'Control de Gestion - ' + (d.tipo === 'TODOS' ? 'Todas las libretas' : tipoDef(d.tipo).nombre) + ' - ' + rango + '.xlsx');
+        boton.disabled = false;
+      }).catch(function (e) { boton.disabled = false; fallo(e); });
+    });
+    cont.appendChild(h('div', null,
+      h('div', { class: 'titulo-vista' }, h('h1', null, 'Exportación'), h('span', { class: 'sub' }, 'Descarga los registros en Excel. Solo administradores; cada descarga queda en la bitácora.')),
+      h('div', { class: 'tarjeta expo' },
+        campo('Libreta', libreta),
+        h('div', { class: 'campo' }, h('span', { class: 'campo__et' }, 'Periodo'), h('div', { class: 'expo__rangos' }, botonesRango)),
+        h('div', { class: 'expo__fechas' }, campo('Desde', desde), campo('Hasta', hasta)),
+        h('div', { class: 'expo__nota' }, 'Cuenta la fecha de recibido; si el registro no la tiene, la del documento.'),
+        resumen,
+        h('div', null, boton))));
+    previa();
+  };
+
+  /* ───────────────────────── Pendientes ───────────────────────── */
+  vistas.pendientes = function () {
+    var cont = h('div', { class: 'pend' }, h('div', { class: 'tarjeta vacio' }, 'Cargando…'));
+    marco('pendientes').appendChild(h('div', null, h('div', { class: 'titulo-vista' }, h('h1', null, 'Pendientes'),
+      h('span', { class: 'sub' }, 'Lo que está por atender y los oficios que salieron sin acuse')), cont));
+    var gen = E.gen;
+    if (E.pend) pintar(E.pend.datos);   // lo de la visita anterior (o la precarga), al instante
+    llamar('pendientes', null, E.pend ? { silencioso: true } : null).then(function (p) {
+      if (gen !== E.gen) return;
+      var firma = JSON.stringify(p), cambio = !E.pend || E.pend.firma !== firma;
+      E.pend = { datos: p, firma: firma };
+      if (cambio && cont.isConnected) pintar(p);
+    }).catch(function (e) {
+      if (E.pend) return;
+      fallo(e); vaciar(cont).appendChild(h('div', { class: 'tarjeta vacio' }, e.message));
+    });
+    function pintar(p) {
+      vaciar(cont);
+      function item(r, conPersona) {
+        var per = lineas(r.tipo === 'OFS' ? r.dirigido_a : r.firma).primera;
+        return h('div', { class: 'pend__i', tabindex: '0', onclick: function () { abrirDetalle(r.id, r); }, onkeydown: function (ev) { if (ev.key === 'Enter') abrirDetalle(r.id, r); } },
+          h('div', null, h('div', { class: 't-num' }, etiquetaNum(r)), h('div', { class: 'pend__tipo' }, tipoDef(r.tipo).singular)),
+          h('div', null, h('div', null, r.asunto || 'Sin asunto'), h('div', { class: 'item__meta' }, [r.numero, conPersona ? per : null, r.turnado_a ? 'Turnado a: ' + r.turnado_a : null, fechaCorta(r.fecha_recepcion || r.fecha)].filter(Boolean).join(' · '))),
+          h('div', { style: { display: 'grid', gap: '4px', justifyItems: 'end' } }, r.estatus ? insEstatus(r.estatus) : null, insVence(r)));
+      }
+      var limite = 150;
+      cont.appendChild(h('section', { class: 'tarjeta' }, h('h2', null, icono('reloj'), 'Por atender', h('span', { class: 'ins' }, p.porAtender.length)),
+        p.porAtender.length ? p.porAtender.slice(0, limite).map(function (r) { return item(r, true); }) : h('div', { class: 'vacio' }, 'Nada pendiente. ¡Bien!'),
+        p.porAtender.length > limite ? h('div', { class: 'vacio' }, 'Y ' + (p.porAtender.length - limite) + ' más. Usa el filtro de estatus en Registros.') : null));
+      cont.appendChild(h('section', { class: 'tarjeta' }, h('h2', null, icono('archivo'), 'Oficios salientes sin acuse', h('span', { class: 'ins' }, p.sinAcuse.length)),
+        p.sinAcuse.length ? p.sinAcuse.slice(0, limite).map(function (r) { return item(r, true); }) : h('div', { class: 'vacio' }, 'Todos los oficios tienen acuse.'),
+        p.sinAcuse.length > limite ? h('div', { class: 'vacio' }, 'Y ' + (p.sinAcuse.length - limite) + ' más. En Registros filtra «Sin acuse».') : null));
+    }
+  };
+
+  /* ───────────────────────── Mis asuntos ───────────────────────── */
+  vistas.misAsuntos = function () {
+    var cont = h('div', { class: 'mis' }, h('div', { class: 'tarjeta vacio' }, 'Cargando…'));
+    marco('misAsuntos').appendChild(h('div', null, h('div', { class: 'titulo-vista' }, h('h1', null, 'Mis asuntos'),
+      h('span', { class: 'sub' }, 'Lo que te turnaron, de tus libretas')), cont));
+    if (!tiene('misAsuntos')) {
+      vaciar(cont).appendChild(h('div', { class: 'tarjeta vacio' }, h('strong', null, 'Falta publicar el servidor'), 'Esta pantalla necesita la versión ' + VERSION_APP + ' del servidor de Apps Script.'));
+      return;
+    }
+    var gen = E.gen;
+    if (E.mis) pintar(E.mis.datos);   // lo de la visita anterior (o la precarga), al instante
+    llamar('misAsuntos', null, E.mis ? { silencioso: true } : null).then(function (m) {
+      if (gen !== E.gen) return;
+      var firma = JSON.stringify(m), cambio = !E.mis || E.mis.firma !== firma;
+      E.mis = { datos: m, firma: firma };
+      if (cambio && cont.isConnected) pintar(m);
+    }).catch(function (e) {
+      if (E.mis) return;
+      fallo(e); vaciar(cont).appendChild(h('div', { class: 'tarjeta vacio' }, e.message));
+    });
+    function pintar(m) {
+      vaciar(cont);
+      var hoy = m.hoy || hoyIso();
+      var grupos = [
+        { clave: 'vencidos', titulo: 'Vencidos', icono: 'alerta', clase: 'mis__g--vencido', vacio: 'Nada vencido.', filtro: function (r) { return esActivo(r) && r.fecha_limite && r.fecha_limite < hoy; } },
+        { clave: 'hoy', titulo: 'Vencen hoy', icono: 'alarma', clase: 'mis__g--hoy', vacio: 'Nada vence hoy.', filtro: function (r) { return esActivo(r) && r.fecha_limite === hoy; } },
+        { clave: 'atender', titulo: 'Por atender', icono: 'reloj', clase: '', vacio: 'Nada más por atender.', filtro: function (r) { return esActivo(r) && !(r.fecha_limite && r.fecha_limite <= hoy); } },
+        { clave: 'otros', titulo: 'Atendidos, concluidos o sin estatus', icono: 'check', clase: 'mis__g--otros', vacio: 'Nada aquí todavía.', filtro: function (r) { return !esActivo(r); } }
+      ];
+      if (!m.asuntos.length) {
+        cont.appendChild(h('div', { class: 'tarjeta vacio' }, h('strong', null, 'No tienes asuntos turnados'),
+          'Cuando alguien te turne un oficio desde «Seguimiento», aparecerá aquí.'));
+        return;
+      }
+      grupos.forEach(function (g) {
+        var lista = m.asuntos.filter(g.filtro);
+        if (!lista.length && g.clave === 'otros') return;
+        var limite = g.clave === 'otros' ? 50 : 200;
+        cont.appendChild(h('section', { class: 'tarjeta mis__g ' + g.clase },
+          h('h2', null, icono(g.icono), g.titulo, h('span', { class: 'ins' }, lista.length)),
+          lista.length ? lista.slice(0, limite).map(function (r) {
+            var per = lineas(r.tipo === 'OFS' ? r.dirigido_a : r.firma).primera;
+            return h('div', { class: 'pend__i', tabindex: '0', onclick: function () { abrirDetalle(r.id, r); }, onkeydown: function (ev) { if (ev.key === 'Enter') abrirDetalle(r.id, r); } },
+              h('div', null, h('div', { class: 't-num' }, etiquetaNum(r)), h('div', { class: 'pend__tipo' }, tipoDef(r.tipo).singular)),
+              h('div', null, h('div', null, r.asunto || 'Sin asunto'), h('div', { class: 'item__meta' }, [r.numero, per, r.fecha_limite ? 'Límite: ' + fechaCorta(r.fecha_limite) : null, fechaCorta(r.fecha_recepcion || r.fecha)].filter(Boolean).join(' · '))),
+              h('div', { style: { display: 'grid', gap: '4px', justifyItems: 'end' } }, r.estatus ? insEstatus(r.estatus) : null, insVence(r)));
+          }) : h('div', { class: 'vacio' }, g.vacio),
+          lista.length > limite ? h('div', { class: 'vacio' }, 'Y ' + (lista.length - limite) + ' más.') : null));
+      });
+      if (m.total > m.asuntos.length) cont.appendChild(h('p', { class: 'conteo' }, 'Se muestran los ' + m.asuntos.length + ' más recientes de ' + m.total + '.'));
+    }
+  };
+
+  /* ───────────────────────── Informes ───────────────────────── */
+  // Gráficas en SVG hechas a mano (sin librerías). Se dibujan al ancho real del
+  // contenedor (así el texto se lee igual en celular) y se vuelven a dibujar al
+  // cambiar el tamaño de la ventana. Los nombres y números van como texto (textContent).
+  var SVGNS = 'http://www.w3.org/2000/svg';
+  var MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+  var HEX_TIPO = { OFS: '#8f4889', OFE: '#027a35', OFC: '#266cb4', CIR: '#9d2148', TAR: '#ac6d14', VOL: '#d72f89' };   // paleta del manual CDMX
+  // Colores de estado: siempre con su ícono, su nombre y su número (nunca solos).
+  // Revisados con el validador de daltonismo: verde/ámbar/rojo se distinguen también
+  // con protanopía y deuteranopía; el ámbar es claro, por eso su ícono va en tinta oscura.
+  var ESTADO = {
+    aTiempo: { color: '#027a35', tinta: '#fff', txt: 'A tiempo', marca: '✓' },
+    tarde: { color: '#d9a21b', tinta: '#3b2a00', txt: 'Fuera de plazo', marca: '!' },
+    vencido: { color: '#e5074c', tinta: '#fff', txt: 'Vencido sin atender', marca: '✕' }
+  };
+  var TINTA = '#2d2a2e', TINTA3 = '#7b7e80', REJILLA = '#ece4eb';
+
+  function sv(tag, attrs) {
+    var el = document.createElementNS(SVGNS, tag);
+    Object.keys(attrs || {}).forEach(function (k) { if (attrs[k] !== null && attrs[k] !== undefined) el.setAttribute(k, attrs[k]); });
+    for (var i = 2; i < arguments.length; i++) {
+      var c = arguments[i];
+      if (c === null || c === undefined) continue;
+      el.appendChild(typeof c === 'string' || typeof c === 'number' ? document.createTextNode(String(c)) : c);
+    }
+    return el;
+  }
+  function numero(n) { return Number(n || 0).toLocaleString('es-MX'); }
+  function decimal(n) { return n === null || n === undefined ? '—' : Number(n).toLocaleString('es-MX', { maximumFractionDigits: 1 }); }
+  function mesLargo(m) { var p = m.split('-'); return MESES[Number(p[1]) - 1] + ' ' + p[0]; }
+  function mesCorto(m, conAnio) { var p = m.split('-'); var t = MESES[Number(p[1]) - 1].slice(0, 3); t = t.charAt(0).toUpperCase() + t.slice(1); return conAnio ? t + ' ' + p[0].slice(2) : t; }
+  function tope(max) {   // máximo «redondo» para el eje
+    if (max <= 4) return Math.max(1, max);
+    var p = Math.pow(10, Math.floor(Math.log10(max))), pasos = [1, 2, 2.5, 5, 10];
+    for (var i = 0; i < pasos.length; i++) if (pasos[i] * p >= max) return pasos[i] * p;
+    return 10 * p;
+  }
+  /** Columna con la punta redondeada (4 px) y la base recta. */
+  function columna(x, y, w, alto, color) {
+    var r = Math.min(4, w / 2, alto);
+    return sv('path', { d: 'M' + x + ',' + (y + alto) + 'V' + (y + r) + 'Q' + x + ',' + y + ' ' + (x + r) + ',' + y + 'H' + (x + w - r) + 'Q' + (x + w) + ',' + y + ' ' + (x + w) + ',' + (y + r) + 'V' + (y + alto) + 'Z', fill: color });
+  }
+  /** Un solo globo de ayuda por gráfica; se muestra al pasar el mouse, al tocar o con el teclado. */
+  function globo(envoltura) {
+    var tip = h('div', { class: 'tip', role: 'tooltip' });
+    envoltura.appendChild(tip);
+    return {
+      mostrar: function (x, y, contenido) {
+        vaciar(tip); agregar(tip, contenido); tip.classList.add('tip--on');
+        var w = tip.offsetWidth, hh = tip.offsetHeight, W = envoltura.clientWidth;
+        tip.style.left = Math.max(2, Math.min(W - w - 2, x - w / 2)) + 'px';
+        tip.style.top = Math.max(0, y - hh - 10) + 'px';
+      },
+      ocultar: function () { tip.classList.remove('tip--on'); }
+    };
+  }
+
+  /**
+   * Columnas por mes. datos = [{ etiqueta, valor, ayuda: Node[] }]
+   * o = { color, alto, mini, nombre }
+   */
+  function graficaColumnas(cont, datos, o) {
+    vaciar(cont);
+    var W = Math.max(240, cont.clientWidth || 600), H = o.alto || 220;
+    var izq = o.mini ? 26 : 36, der = 8, arriba = 18, abajo = 22;
+    var pw = W - izq - der, ph = H - arriba - abajo;
+    var max = tope(Math.max.apply(null, datos.map(function (d) { return d.valor; }).concat([0])));
+    var y = function (v) { return arriba + ph - (v / max) * ph; };
+    var banda = pw / Math.max(1, datos.length), ancho = Math.max(2, Math.min(24, banda * 0.66));
+    var svg = sv('svg', { width: W, height: H, viewBox: '0 0 ' + W + ' ' + H, role: 'img', 'aria-label': o.nombre || 'Gráfica', class: 'graf' });
+    var marcas = o.mini ? [0, max] : [0, max / 2, max];
+    marcas.forEach(function (v) {
+      svg.appendChild(sv('line', { x1: izq, x2: W - der, y1: y(v), y2: y(v), stroke: REJILLA, 'stroke-width': 1, 'shape-rendering': 'crispEdges' }));
+      svg.appendChild(sv('text', { x: izq - 6, y: y(v) + 4, 'text-anchor': 'end', 'font-size': 11, fill: TINTA3 }, numero(v)));
+    });
+    var iMax = -1, vMax = -1;
+    datos.forEach(function (d, i) { if (d.valor > vMax) { vMax = d.valor; iMax = i; } });
+    var cadaCuanto = o.mini ? Math.max(1, datos.length - 1) : Math.ceil(datos.length / Math.max(1, Math.floor(pw / 42)));
+    var tip = globo(cont);
+    datos.forEach(function (d, i) {
+      var cx = izq + banda * i + banda / 2;
+      if (d.valor > 0) svg.appendChild(columna(cx - ancho / 2, y(d.valor), ancho, arriba + ph - y(d.valor), o.color));
+      // Etiquetas selectivas: el máximo y el último (el resto, en el globo y en la tabla)
+      if (d.valor > 0 && (i === iMax || (i === datos.length - 1 && !o.mini))) {
+        svg.appendChild(sv('text', { x: cx, y: y(d.valor) - 5, 'text-anchor': 'middle', 'font-size': 11, 'font-weight': 600, fill: TINTA }, numero(d.valor)));
+      }
+      if (i % cadaCuanto === 0 || i === datos.length - 1) {
+        svg.appendChild(sv('text', { x: cx, y: H - 6, 'text-anchor': 'middle', 'font-size': 11, fill: TINTA3 }, d.etiqueta));
+      }
+      var zona = sv('rect', { x: izq + banda * i, y: arriba, width: banda, height: ph, fill: 'transparent', tabindex: 0, class: 'graf__zona',
+        'aria-label': d.etiquetaLarga + ': ' + numero(d.valor) });
+      var ver = function () { tip.mostrar(cx, y(d.valor), d.ayuda); zona.classList.add('activa'); };
+      var quitar = function () { tip.ocultar(); zona.classList.remove('activa'); };
+      zona.addEventListener('pointerenter', ver); zona.addEventListener('pointerdown', ver); zona.addEventListener('focus', ver);
+      // Con el dedo, el globo se queda hasta tocar otra parte (si no, se borraría al soltar)
+      zona.addEventListener('pointerleave', function (ev) { if (ev.pointerType !== 'touch') quitar(); });
+      zona.addEventListener('blur', quitar);
+      svg.appendChild(zona);
+    });
+    svg.appendChild(sv('line', { x1: izq, x2: W - der, y1: arriba + ph, y2: arriba + ph, stroke: '#cdbccb', 'stroke-width': 1, 'shape-rendering': 'crispEdges' }));
+    cont.insertBefore(svg, cont.firstChild);
+  }
+
+  /** Barras horizontales (ranking): nombre arriba (puede ocupar dos renglones), barra y número. */
+  function barrasH(cont, items, o) {
+    vaciar(cont);
+    if (!items.length) { cont.appendChild(h('p', { class: 'inf__vacio' }, o.vacio || 'Sin datos en este periodo.')); return; }
+    var max = Math.max.apply(null, items.map(function (x) { return x.n; }).concat([1]));
+    items.forEach(function (x) {
+      var fila = h('div', { class: 'hb' }, h('div', { class: 'hb__nombre' }, x.nombre), h('div', { class: 'hb__barra' }), h('div', { class: 'hb__n' }, numero(x.n)));
+      cont.appendChild(fila);
+      var caja = fila.children[1], W = Math.max(40, caja.clientWidth || 200), w = Math.max(3, (x.n / max) * W);
+      var svg = sv('svg', { width: W, height: 12, viewBox: '0 0 ' + W + ' 12', 'aria-hidden': 'true' },
+        sv('rect', { x: 0, y: 0, width: W, height: 12, rx: 4, fill: '#f4ebf3' }),
+        x.n ? sv('rect', { x: 0, y: 0, width: w, height: 12, rx: Math.min(4, w / 2), fill: o.color }) : null,
+        x.n ? sv('rect', { x: 0, y: 0, width: Math.min(4, w), height: 12, fill: o.color }) : null);
+      caja.appendChild(svg);
+    });
+  }
+
+  /** Barra de 100 % con los tres estados (con 2 px de separación) y su leyenda con números. */
+  function barraEstados(cont, a) {
+    vaciar(cont);
+    var claves = ['aTiempo', 'tarde', 'vencido'], total = claves.reduce(function (s, k) { return s + a[k]; }, 0);
+    if (!total) { cont.appendChild(h('p', { class: 'inf__vacio' }, 'Ningún asunto con fecha límite que ya se pueda evaluar en este periodo.')); return; }
+    var W = Math.max(200, cont.clientWidth || 400), H = 22, x = 0;
+    var svg = sv('svg', { width: W, height: H, viewBox: '0 0 ' + W + ' ' + H, role: 'img', class: 'graf',
+      'aria-label': claves.map(function (k) { return ESTADO[k].txt + ': ' + a[k]; }).join(', ') });
+    var activas = claves.filter(function (k) { return a[k] > 0; });
+    var util = W - 2 * (activas.length - 1);
+    activas.forEach(function (k, i) {
+      var w = Math.max(3, (a[k] / total) * util);
+      svg.appendChild(sv('rect', { x: x, y: 0, width: w, height: H, rx: 4, fill: ESTADO[k].color }));
+      if (i > 0) svg.appendChild(sv('rect', { x: x, y: 0, width: Math.min(4, w), height: H, fill: ESTADO[k].color }));
+      if (i < activas.length - 1) svg.appendChild(sv('rect', { x: x + w - Math.min(4, w), y: 0, width: Math.min(4, w), height: H, fill: ESTADO[k].color }));
+      x += w + 2;
+    });
+    cont.appendChild(svg);
+    cont.appendChild(h('ul', { class: 'inf__leyenda' }, claves.map(function (k) {
+      return h('li', null, h('span', { class: 'inf__marca', style: { background: ESTADO[k].color, color: ESTADO[k].tinta } }, ESTADO[k].marca),
+        h('strong', null, numero(a[k])), ' ', ESTADO[k].txt, h('span', { class: 'inf__pct' }, ' · ' + Math.round(a[k] / total * 100) + ' %'));
+    })));
+  }
+
+  function tablaDatos(titulo, columnas, filas) {
+    return h('details', { class: 'inf__tabla' }, h('summary', null, 'Ver los datos en tabla'),
+      h('div', { class: 'tabla-env', style: { display: 'block' } }, h('table', { class: 'tabla' }, h('caption', { class: 'sr' }, titulo),
+        h('thead', null, h('tr', null, columnas.map(function (c) { return h('th', null, c); }))),
+        h('tbody', null, filas.map(function (f) { return h('tr', { style: { cursor: 'default' } }, f.map(function (v) { return h('td', null, v); })); })))));
+  }
+
+  function hastaHoy() { return hoyIso(); }
+  function periodo(preset) {
+    var hoy = hoyIso(), a = Number(hoy.slice(0, 4)), m = Number(hoy.slice(5, 7));
+    if (preset === 'mes') return [hoy.slice(0, 7) + '-01', hoy];
+    if (preset === '12m') { var mm = m - 11, aa = a; if (mm < 1) { mm += 12; aa--; } return [aa + '-' + ('0' + mm).slice(-2) + '-01', hoy]; }
+    if (preset === 'anterior') return [(a - 1) + '-01-01', (a - 1) + '-12-31'];
+    return [a + '-01-01', hastaHoy()];
+  }
+
+  var dibujarInformes = null;
+  document.addEventListener('pointerdown', function (ev) {
+    if (ev.target && ev.target.closest && ev.target.closest('.graf__zona')) return;
+    Array.prototype.forEach.call(document.querySelectorAll('.tip--on'), function (t) { t.classList.remove('tip--on'); });
+    Array.prototype.forEach.call(document.querySelectorAll('.graf__zona.activa'), function (z) { z.classList.remove('activa'); });
+  });
+  var esperaTamano = null;
+  window.addEventListener('resize', function () {
+    clearTimeout(esperaTamano);
+    esperaTamano = setTimeout(function () { if (E.vista === 'informes' && dibujarInformes) dibujarInformes(); }, 200);
+  });
+
+  vistas.informes = function () {
+    var cont = marco('informes');
+    cont.appendChild(h('div', { class: 'titulo-vista' }, h('h1', null, 'Informes'), h('span', { class: 'sub' }, 'Solo de tus libretas · sin registros cancelados')));
+    if (!tiene('informes')) {
+      cont.appendChild(h('div', { class: 'tarjeta vacio' }, h('strong', null, 'Sin acceso a Informes'), 'Pide a un administrador que te dé permiso, o falta publicar el servidor ' + VERSION_APP + '.'));
+      return;
+    }
+    var st = E.inf = E.inf || { preset: 'anio', tipos: E.ini.orden.slice(), datos: null };
+    if (st.preset !== 'personalizado') { var p = periodo(st.preset); st.desde = p[0]; st.hasta = p[1]; }
+    var preset = h('select', { class: 'entrada', 'aria-label': 'Periodo' },
+      [['anio', 'Este año'], ['12m', 'Últimos 12 meses'], ['mes', 'Este mes'], ['anterior', 'Año pasado'], ['personalizado', 'Otro periodo']].map(function (o) {
+        return h('option', { value: o[0], selected: o[0] === st.preset }, o[1]);
+      }));
+    var desde = h('input', { class: 'entrada', type: 'date', value: st.desde, 'aria-label': 'Desde', min: '2000-01-01', max: '2100-12-31' });
+    var hasta = h('input', { class: 'entrada', type: 'date', value: st.hasta, 'aria-label': 'Hasta', min: '2000-01-01', max: '2100-12-31' });
+    var libretas = h('div', { class: 'inf__libretas', role: 'group', 'aria-label': 'Libretas' }, E.ini.orden.map(function (t) {
+      var b = h('button', { type: 'button', class: 'inf__lib', 'aria-pressed': st.tipos.indexOf(t) >= 0 ? 'true' : 'false', onclick: function () {
+        var i = st.tipos.indexOf(t);
+        if (i >= 0 && st.tipos.length === 1) { aviso('Deja al menos una libreta.'); return; }
+        if (i >= 0) st.tipos.splice(i, 1); else st.tipos.push(t);
+        b.setAttribute('aria-pressed', i >= 0 ? 'false' : 'true');
+        cargar();
+      } }, h('span', { class: 'inf__punto', style: { background: HEX_TIPO[t] } }), E.ini.todosTipos[t].nombre);
+      return b;
+    }));
+    var excel = h('button', { class: 'btn', onclick: function () { excelInformes(); } }, icono('excel'), 'Excel');
+    preset.addEventListener('change', function () {
+      st.preset = preset.value;
+      if (st.preset !== 'personalizado') { var p = periodo(st.preset); st.desde = desde.value = p[0]; st.hasta = hasta.value = p[1]; cargar(); }
+      else desde.focus();
+    });
+    [desde, hasta].forEach(function (x) { x.addEventListener('change', function () {
+      if (!desde.value || !hasta.value) return;
+      st.preset = 'personalizado'; preset.value = 'personalizado'; st.desde = desde.value; st.hasta = hasta.value; cargar();
+    }); });
+    var zona = h('div', { class: 'inf' });
+    cont.appendChild(h('div', { class: 'inf__filtros' }, h('div', { class: 'inf__periodo' }, preset, desde, h('span', { class: 'inf__a' }, 'a'), hasta), excel));
+    cont.appendChild(libretas);
+    cont.appendChild(zona);
+    var pedido = 0;
+    function cargar() {
+      var n = ++pedido;
+      zona.classList.add('inf--cargando');
+      if (!st.datos) vaciar(zona).appendChild(h('div', { class: 'tarjeta vacio' }, 'Calculando…'));
+      llamar('informes', { desde: st.desde, hasta: st.hasta, tipos: st.tipos }).then(function (d) {
+        if (n !== pedido) return;
+        st.datos = d; pintar(d);
+      }).catch(function (e) { if (n === pedido) { fallo(e); if (!st.datos) vaciar(zona).appendChild(h('div', { class: 'tarjeta vacio' }, e.message)); } })
+        .then(function () { if (n === pedido) zona.classList.remove('inf--cargando'); });
+    }
+    function tarjeta(titulo, sub, cuerpo, extra) {
+      return h('section', { class: 'tarjeta inf__t' + (extra || '') }, h('h2', null, titulo), sub ? h('p', { class: 'inf__sub' }, sub) : null, cuerpo);
+    }
+    function pintar(d) {
+      vaciar(zona);
+      var r = d.respuesta, a = d.aTiempo, multiAnio = d.desde.slice(0, 4) !== d.hasta.slice(0, 4);
+      // Indicadores (números grandes)
+      zona.appendChild(h('div', { class: 'inf__kpis' },
+        h('div', { class: 'kpi' }, h('span', { class: 'kpi__t' }, 'Registros'), h('strong', { class: 'kpi__v' }, numero(d.total)),
+          h('span', { class: 'kpi__d' }, 'del ' + fechaCorta(d.desde) + ' al ' + fechaCorta(d.hasta))),
+        h('div', { class: 'kpi' }, h('span', { class: 'kpi__t' }, 'Respondidos con oficio'), h('strong', { class: 'kpi__v' }, numero(r.casos)),
+          h('span', { class: 'kpi__d' }, 'de ' + numero(r.recibidos) + ' recibidos en el periodo')),
+        h('div', { class: 'kpi' }, h('span', { class: 'kpi__t' }, 'Tiempo promedio de respuesta'), h('strong', { class: 'kpi__v' }, r.promedio === null ? '—' : decimal(r.promedio)),
+          h('span', { class: 'kpi__d' }, r.promedio === null ? 'sin respuestas con oficio' : 'días hábiles · mediana ' + decimal(r.mediana))),
+        h('div', { class: 'kpi' }, h('span', { class: 'kpi__t' }, 'Atendido a tiempo'), h('strong', { class: 'kpi__v' }, a.porcentaje === null ? '—' : decimal(a.porcentaje) + ' %'),
+          h('span', { class: 'kpi__d' }, a.porcentaje === null ? 'sin fechas límite que evaluar' : numero(a.aTiempo) + ' de ' + numero(a.aTiempo + a.tarde + a.vencido) + ' con fecha límite'))));
+      // 1 · Por mes (total) y por libreta (una gráfica chica por libreta)
+      var gMes = h('div', { class: 'graf-env' });
+      zona.appendChild(tarjeta('Registros por mes', 'Todas las libretas elegidas. Toca una columna para ver el detalle.', [gMes,
+        tablaDatos('Registros por mes', ['Mes'].concat(d.tipos.map(function (t) { return E.ini.todosTipos[t].nombre; })).concat(['Total']),
+          d.porMes.map(function (m) { return [mesLargo(m.mes)].concat(d.tipos.map(function (t) { return numero(m.porTipo[t]); })).concat([numero(m.total)]); }))]));
+      var multiples = h('div', { class: 'inf__multiples' });
+      zona.appendChild(tarjeta('Por libreta', 'Cada libreta con su propia escala.', multiples));
+      var minis = d.tipos.map(function (t) {
+        var g = h('div', { class: 'graf-env graf-env--mini' });
+        multiples.appendChild(h('div', { class: 'inf__mini' }, h('h3', null, h('span', { class: 'inf__punto', style: { background: HEX_TIPO[t] } }), E.ini.todosTipos[t].nombre,
+          h('span', { class: 'inf__mini-n' }, numero(d.totalesTipo[t]))), g));
+        return { t: t, g: g };
+      });
+      // 2 · Remitentes y destinatarios
+      var gRem = h('div', { class: 'hbs' }), gDes = h('div', { class: 'hbs' });
+      zona.appendChild(h('div', { class: 'inf__dos' },
+        tarjeta('Principales remitentes', d.remitentes.total ? numero(d.remitentes.distintos) + ' remitentes distintos en ' + numero(d.remitentes.total) + ' documentos recibidos' : 'De lo que se recibe (entrantes, conocimiento, circulares, tarjetas y volantes)', gRem),
+        tarjeta('Principales destinatarios', d.destinatarios.total ? numero(d.destinatarios.distintos) + ' destinatarios distintos en ' + numero(d.destinatarios.total) + ' oficios salientes' : 'De los oficios salientes', gDes)));
+      // 3 · Tiempo de respuesta
+      var gDist = h('div', { class: 'hbs' });
+      zona.appendChild(h('div', { class: 'inf__dos' },
+        tarjeta('Tiempo de respuesta', 'Del día en que se recibió al oficio que lo contestó («Responder con oficio»), en días hábiles. No descuenta días festivos.', [
+          h('div', { class: 'inf__cifras' },
+            h('div', null, h('strong', null, decimal(r.promedio)), h('span', null, 'promedio')),
+            h('div', null, h('strong', null, decimal(r.mediana)), h('span', null, 'mediana')),
+            h('div', null, h('strong', null, r.maximo === null ? '—' : numero(r.maximo)), h('span', null, 'el más tardado')),
+            h('div', null, h('strong', null, numero(r.casos)), h('span', null, 'casos'))),
+          h('p', { class: 'inf__sub', style: { margin: '10px 0 6px' } }, 'Cuántos se contestaron en…'), gDist]),
+        tarjeta('Atendido a tiempo', 'Asuntos con fecha límite dentro del periodo: si pasaron a «Atendido» o «Concluido» a más tardar ese día.', [
+          h('div', { class: 'inf__grande' }, h('strong', null, a.porcentaje === null ? '—' : decimal(a.porcentaje) + ' %'), h('span', null, 'a tiempo')),
+          (function () { var x = h('div', { class: 'inf__estados' }); x.id = 'inf-estados'; return x; })(),
+          h('p', { class: 'inf__nota' }, 'No cuentan: ' + numero(a.enPlazo) + ' que todavía están en plazo' + (a.sinDato ? ' y ' + numero(a.sinDato) + ' atendidos sin fecha de atención registrada' : '') + '.')])));
+      dibujarInformes = function () {
+        if (!document.body.contains(gMes)) return;
+        graficaColumnas(gMes, d.porMes.map(function (m) {
+          return { etiqueta: mesCorto(m.mes, multiAnio), etiquetaLarga: mesLargo(m.mes), valor: m.total,
+            ayuda: [h('strong', { class: 'tip__v' }, numero(m.total) + ' registros'), h('span', { class: 'tip__t' }, mesLargo(m.mes))].concat(d.tipos.filter(function (t) { return m.porTipo[t]; }).map(function (t) {
+              return h('span', { class: 'tip__f' }, h('i', { style: { background: HEX_TIPO[t] } }), numero(m.porTipo[t]) + ' · ' + E.ini.todosTipos[t].nombre);
+            })) };
+        }), { color: '#8f4889', alto: 230, nombre: 'Registros por mes' });
+        minis.forEach(function (x) {
+          graficaColumnas(x.g, d.porMes.map(function (m) {
+            return { etiqueta: mesCorto(m.mes, multiAnio), etiquetaLarga: mesLargo(m.mes), valor: m.porTipo[x.t] || 0,
+              ayuda: [h('strong', { class: 'tip__v' }, numero(m.porTipo[x.t] || 0)), h('span', { class: 'tip__t' }, mesLargo(m.mes))] };
+          }), { color: HEX_TIPO[x.t], alto: 120, mini: true, nombre: E.ini.todosTipos[x.t].nombre + ' por mes' });
+        });
+        barrasH(gRem, d.remitentes.lista, { color: '#027a35', vacio: 'Sin documentos recibidos en este periodo (o no elegiste esas libretas).' });
+        barrasH(gDes, d.destinatarios.lista, { color: '#8f4889', vacio: 'Sin oficios salientes en este periodo (o no elegiste esa libreta).' });
+        barrasH(gDist, r.casos ? r.distribucion.map(function (x) { return { nombre: x.rango + ' días hábiles', n: x.n }; }) : [],
+          { color: '#266cb4', vacio: 'Ningún documento de este periodo se contestó con «Responder con oficio».' });
+        barraEstados(document.getElementById('inf-estados'), a);
+      };
+      dibujarInformes();
+      // tablas de datos (accesibles sin gráficas)
+      gRem.parentNode.appendChild(tablaDatos('Remitentes', ['Remitente', 'Documentos'], d.remitentes.lista.map(function (x) { return [x.nombre, numero(x.n)]; })));
+      gDes.parentNode.appendChild(tablaDatos('Destinatarios', ['Destinatario', 'Oficios'], d.destinatarios.lista.map(function (x) { return [x.nombre, numero(x.n)]; })));
+    }
+    if (st.datos && st.datos.desde === st.desde && st.datos.hasta === st.hasta) pintar(st.datos);
+    cargar();
+  };
+
+  /** Excel de Informes: resumen, por mes, rankings y el detalle (queda en la bitácora). */
+  function excelInformes() {
+    var st = E.inf;
+    llamar('informes', { desde: st.desde, hasta: st.hasta, tipos: st.tipos, excel: true }).then(function (d) {
+      var enc = E.ini.config.encabezados || [];
+      var ahora = new Date(), cuando = fechaCorta(hoyIso()) + ' ' + ('0' + ahora.getHours()).slice(-2) + ':' + ('0' + ahora.getMinutes()).slice(-2);
+      var tit = function (t) { return enc.concat(['Control de Gestión · Informes · ' + t, 'Del ' + fechaCorta(d.desde) + ' al ' + fechaCorta(d.hasta) + ' · ' + d.tipos.map(function (x) { return E.ini.todosTipos[x].nombre; }).join(', ') + ' · generado el ' + cuando + ' por ' + E.ini.yo.nombre]); };
+      var r = d.respuesta, a = d.aTiempo;
+      var RES = { aTiempo: 'A tiempo', tarde: 'Fuera de plazo', vencido: 'Vencido sin atender', enPlazo: 'Aún en plazo', sinDato: 'Sin fecha de atención' };
+      var hojas = [
+        { nombre: 'Resumen', titulos: tit('Resumen'), encabezados: ['Indicador', 'Valor'], anchos: [46, 18], tipos: ['texto', 'numero'], filas: [
+          ['Registros en el periodo', d.total]].concat(d.tipos.map(function (t) { return ['  ' + E.ini.todosTipos[t].nombre, d.totalesTipo[t]]; })).concat([
+          ['Recibidos en el periodo', r.recibidos], ['Respondidos con oficio', r.casos],
+          ['Tiempo promedio de respuesta (días hábiles)', r.promedio === null ? '' : r.promedio], ['Mediana (días hábiles)', r.mediana === null ? '' : r.mediana],
+          ['Respuesta más tardada (días hábiles)', r.maximo === null ? '' : r.maximo],
+          ['Con fecha límite en el periodo', a.conLimite], ['A tiempo', a.aTiempo], ['Fuera de plazo', a.tarde], ['Vencidos sin atender', a.vencido],
+          ['Aún en plazo (no cuentan)', a.enPlazo], ['Atendidos sin fecha de atención (no cuentan)', a.sinDato], ['Porcentaje atendido a tiempo', a.porcentaje === null ? '' : a.porcentaje]]),
+          pie: 'No cuenta registros cancelados. Días hábiles = lunes a viernes, sin descontar días festivos.' },
+        { nombre: 'Por mes', titulos: tit('Registros por mes'), encabezados: ['Mes'].concat(d.tipos.map(function (t) { return E.ini.todosTipos[t].nombre; })).concat(['Total']),
+          anchos: [16].concat(d.tipos.map(function () { return 14; })).concat([10]), tipos: ['texto'].concat(d.tipos.map(function () { return 'numero'; })).concat(['numero']),
+          filas: d.porMes.map(function (m) { return [mesLargo(m.mes)].concat(d.tipos.map(function (t) { return m.porTipo[t]; })).concat([m.total]); }) },
+        { nombre: 'Remitentes', titulos: tit('Principales remitentes'), encabezados: ['Remitente', 'Documentos'], anchos: [50, 12], tipos: ['texto', 'numero'],
+          filas: d.remitentes.lista.map(function (x) { return [x.nombre, x.n]; }) },
+        { nombre: 'Destinatarios', titulos: tit('Principales destinatarios'), encabezados: ['Destinatario', 'Oficios'], anchos: [50, 12], tipos: ['texto', 'numero'],
+          filas: d.destinatarios.lista.map(function (x) { return [x.nombre, x.n]; }) },
+        { nombre: 'Tiempo de respuesta', titulos: tit('Tiempo de respuesta'), encabezados: ['Recibido', 'No. de oficio', 'Asunto', 'Fecha de recepción', 'Respondido con', 'No. oficial', 'Fecha del oficio', 'Días hábiles'],
+          anchos: [24, 22, 46, 13, 24, 22, 13, 11], tipos: ['texto', 'texto', 'texto', 'fecha', 'texto', 'texto', 'fecha', 'numero'],
+          filas: r.pares.map(function (p) { return [p.recibido, p.numero, p.asunto, p.recepcion, p.respuesta, p.numero_respuesta, p.fecha_respuesta, p.dias]; }) },
+        { nombre: 'A tiempo', titulos: tit('Atendido a tiempo'), encabezados: ['Registro', 'No. de oficio', 'Asunto', 'Estatus', 'Fecha límite', 'Fecha de atención', 'De dónde salió la fecha', 'Resultado'],
+          anchos: [24, 22, 46, 12, 13, 13, 18, 18], tipos: ['texto', 'texto', 'texto', 'centro', 'fecha', 'fecha', 'texto', 'texto'],
+          filas: a.detalle.map(function (x) { return [x.registro, x.numero, x.asunto, x.estatus, x.fecha_limite, x.fecha_atencion, x.fuente, RES[x.resultado] || x.resultado]; }) }
+      ];
+      descargarBytes(ExcelCG.libro(hojas), 'Informes Control de Gestión ' + d.desde + ' a ' + d.hasta + '.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    }).catch(fallo);
+  }
+</script>

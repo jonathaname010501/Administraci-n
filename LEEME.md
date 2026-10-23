@@ -111,6 +111,115 @@ Mientras está prendido:
   pregunta **no** alarga la sesión).
 - Prenderlo, apagarlo o cambiar el mensaje queda en la Bitácora.
 
+## Cambiar varios a la vez
+
+En cada libreta, **«Seleccionar»** pone una casilla en cada renglón (y una arriba para
+todos los que se ven). Con los elegidos, la barra de arriba deja cambiar de una vez:
+**Estatus**, **Acuse** (u «Original» en entrantes), **Turnar** a una persona del sistema
+o **Fecha límite**. Sirve, por ejemplo, para marcar con acuse los 40 oficios que
+regresaron firmados.
+
+- Hasta **500** por vez. Antes de guardar dice cuántos va a cambiar.
+- Los cancelados no se pueden elegir; para cancelar hay que escribir el motivo de cada
+  uno, desde su detalle.
+- El servidor revisa cada registro (libreta, permiso, que no esté cancelado): los que no
+  puede tocar los salta y dice cuáles y por qué. Los que ya tenían ese valor no se tocan.
+- Cada cambio queda en la Bitácora y en el historial del registro, igual que si se
+  hiciera uno por uno.
+
+## Ver los escaneos sin descargarlos
+
+**«Abrir»** en Documento o Acuse ya no descarga el archivo: lo muestra en una ventana
+encima del registro, con **«Descargar»** y, en los PDF, **«Abrir en otra pestaña»**.
+Las imágenes se ven en cualquier equipo; los PDF se ven dentro de la ventana en
+computadora (en Vercel). En el celular, el visor de PDF no funciona dentro de una página,
+así que ahí se abren en otra pestaña o se descargan. Cada vez que se abre un escaneo
+queda en la Bitácora, como antes.
+
+## Borrador del oficio en Word
+
+Para no escribir otra vez lo que ya se capturó: en **Configuración → Borrador del oficio
+en Word** se pone el enlace de un documento de Google Docs con el formato del oficio, y
+donde va cada dato se escribe un marcador:
+
+| Marcador | Sale |
+|---|---|
+| `{{NUMERO}}` | SAPCI/STPI/417/2026 |
+| `{{FECHA_LARGA}}` / `{{FECHA}}` | 21 de octubre de 2026 / 21/10/2026 |
+| `{{DESTINATARIO}}`, `{{CARGO_DESTINATARIO}}` | la persona y su cargo (del directorio) |
+| `{{ASUNTO}}`, `{{OBSERVACIONES}}`, `{{CARPETA}}` | lo capturado |
+| `{{FIRMA}}`, `{{CARGO_FIRMA}}`, `{{ELABORO}}` | quién firma, su cargo y quién elaboró |
+| `{{CONSECUTIVO}}`, `{{ANIO}}` | 417, 2026 |
+
+En cada oficio saliente aparece **«Borrador en Word»**: descarga un .docx con los datos
+puestos, para terminarlo y firmarlo como siempre. La copia de trabajo se borra sola.
+Por seguridad, la plantilla tiene que estar en la carpeta **«Control de Gestión ·
+Plantillas (NO COMPARTIR)»** que crea `instalar()`: así nadie puede usar el botón para
+leer otro documento de la cuenta dueña.
+
+## Días inhábiles y «sin acuse» desde
+
+En **Configuración**:
+
+- **Días inhábiles**: las fechas que no cuentan (además de sábados y domingos) para la
+  fecha límite que se propone, para «vence pronto» y para el tiempo de respuesta de
+  Informes. Los botones **«Agregar los de ley de 2026»** y **«De 2027»** ponen los días
+  de descanso obligatorio de la Ley Federal del Trabajo más jueves y viernes santo; hay
+  que revisarlos contra el acuerdo de días inhábiles que publica la Gaceta Oficial de la
+  CDMX cada año (vacaciones, días adicionales) y agregar o quitar lo que haga falta.
+- **«Sin acuse» cuenta desde**: con una fecha (por ejemplo, el día en que empezaron a
+  usar el sistema), el aviso de «sin acuse» del portal y de la libreta solo cuenta lo de
+  esa fecha en adelante. Lo migrado del Excel que nunca tuvo acuse deja de inflar el
+  número. El indicador lleva un `*` y su explicación al pasar el mouse.
+- **Plazo de respuesta**: si está vacío, el portal le recuerda al administrador que lo
+  ponga (sin plazo no hay fecha límite y «Vencidos» siempre dice 0).
+
+## Avisos por correo
+
+Se prenden en **Configuración → Avisos por correo** (vienen apagados):
+
+- **Al turnar** un asunto a alguien (uno por uno, con varios destinatarios o en lote),
+  le llega un correo con el número, la libreta, la fecha límite y el enlace a la app.
+- **Todos los días hábiles a las 8 am**, a cada quien con correo, un resumen de lo suyo
+  vencido, lo que vence hoy y lo que vence en los próximos dos días hábiles; a los
+  administradores, además, cuántos asuntos vencidos no están turnados a nadie del
+  sistema. Si no hay nada, no se manda.
+- El correo de cada quien lo pone el administrador en **Usuarios → Editar** o la propia
+  persona en **Mi cuenta**. Sin correo, no recibe nada.
+- **«Incluir el asunto»** viene apagado: sin él, el correo no lleva datos del oficio,
+  solo el número. Es lo más seguro si los correos van a cuentas personales.
+- Salen de la cuenta dueña con `MailApp` (unos 100 al día en una cuenta gratuita; el
+  sistema manda uno por persona y deja de mandar si se acaba la cuota).
+- Si alguien que no es administrador consulta muchísimo en un día (300 registros
+  abiertos, 300 búsquedas, 100 escaneos o 12 listas de años anteriores), queda una
+  alerta en la Bitácora y les llega un correo a los administradores.
+
+## Verificación en dos pasos y «Mi cuenta»
+
+Arriba en el portal, **«Mi cuenta»**: cambiar la contraseña, activar o quitar la
+verificación en dos pasos, poner el correo para avisos y olvidar este equipo.
+
+- **Dos pasos**: después de la contraseña se pide el código de 6 dígitos de una app de
+  autenticación (Google Authenticator, Microsoft Authenticator…). Para activarla se
+  escanea un código QR (se dibuja en la página, sin servicios externos) o se escribe la
+  clave, y se confirma con un código y la contraseña. La clave secreta se guarda
+  cifrada en la hoja.
+- En **Configuración → Verificación en dos pasos** se puede hacer **obligatoria para
+  administradores**: quien no la tenga solo puede activarla antes de seguir.
+- Si alguien pierde el teléfono: **Usuarios → Editar → «Quitar su verificación en dos
+  pasos»**, y la vuelve a activar al entrar.
+- **Equipo de confianza**: al entrar con «Recordar mi usuario en este equipo», ese
+  navegador queda como de confianza por 180 días. Si alguien intenta adivinar tu
+  contraseña y bloquea tu cuenta, desde tu equipo sí puedes entrar (con tu contraseña,
+  claro). Si en ese equipo se equivocan muchas veces, deja de contar.
+
+## Si la sesión se termina con algo abierto
+
+Si la sesión se vence (3 horas sin uso, o cambiaron tus permisos) mientras tienes un
+formulario o una ventana a medias, ya no se pierde lo escrito: aparece **«Tu sesión
+terminó»** encima, se escribe la contraseña (y el código, si tienes dos pasos) y lo que
+ibas a guardar se guarda solo. «Salir sin guardar» sí descarta todo.
+
 ## Volante de recepción (imprimible)
 
 En el detalle de todo lo que se **recibe** (entrantes, conocimiento, circulares,
@@ -142,8 +251,8 @@ administrador marque en **Usuarios → Editar → «Puede ver Informes»** (colu
   los 10 primeros; las personas del directorio se cuentan por ficha, aunque se hayan
   escrito distinto.
 - **Tiempo de respuesta**: del día en que se recibió algo al oficio saliente que lo
-  contestó con «Responder con oficio», en **días hábiles** (lunes a viernes; no
-  descuenta días festivos). Promedio, mediana, el más tardado y cuántos en cada rango.
+  contestó con «Responder con oficio», en **días hábiles** (lunes a viernes, sin los
+  días inhábiles de Configuración). Promedio, mediana, el más tardado y cuántos en cada rango.
 - **Atendido a tiempo**: de los asuntos cuya fecha límite cae en el periodo, cuántos
   pasaron a «Atendido» o «Concluido» a más tardar ese día, cuántos fuera de plazo y
   cuántos siguen abiertos con la fecha vencida. Los que aún están en plazo no cuentan.
@@ -171,8 +280,10 @@ nombre y número.
 En **Configuración → Respaldo completo**, el administrador descarga un Excel con una hoja
 por pestaña: Registros, Directorio, Usuarios (**sin** contraseñas ni sellos de sesión),
 Bitácora y Configuración. Tampoco lleva los IDs internos de Drive (los escaneos están en
-la carpeta «Archivos»). Queda en la Bitácora. Es adicional a la copia automática de cada
-lunes en la carpeta «Respaldos».
+la carpeta «Archivos»). Queda en la Bitácora.
+
+Es adicional a lo automático (ver «Respaldos automáticos» en Seguridad): una copia de la
+hoja **cada día** y la copia de cada escaneo en «Respaldos/Archivos (espejo)».
 
 ## Las libretas
 
@@ -200,6 +311,8 @@ con) y **Archivos** (documento escaneado y acuse: PDF, JPG o PNG hasta 10 MB).
 | Ver «Mis asuntos» (lo que le turnaron) | ✔ | ✔ | ✔ |
 | Buscador general (en sus libretas) | ✔ | ✔ | ✔ |
 | Duplicar un registro, tomar foto con el celular | ✔ | ✔ | — |
+| Cambiar varios a la vez, borrador del oficio en Word | ✔ | ✔ | — |
+| Mi cuenta: contraseña, dos pasos, correo para avisos | ✔ | ✔ | ✔ |
 | Modo mantenimiento, respaldo completo en Excel | ✔ | — | — |
 | Imprimir volante de recepción | ✔ | ✔ | ✔ |
 | Informes (gráficas y Excel de sus libretas) | ✔ | si se le da permiso | si se le da permiso |
@@ -223,13 +336,25 @@ tipografías de Google Fonts.
 `vercel.json`):
 
 - Solo ejecuta los archivos propios y solo puede hablar con Apps Script.
+- Solo muestra dentro de la página los escaneos que ella misma trajo (`blob:`), nunca
+  otra página.
 - No se puede meter dentro de otra página (contra engaños de "clic aquí").
 - No manda la dirección de origen a otros sitios.
 
 **Lo que el sistema cuida:**
 
-- **Nadie entra sin usuario y contraseña.** Las contraseñas se guardan cifradas con
-  PBKDF2-SHA256 y sal, nunca en claro. Cinco intentos fallidos bloquean la cuenta 15 minutos.
+- **Nadie entra sin usuario y contraseña**, y si se activa, sin el **código de dos
+  pasos**. Las contraseñas se guardan cifradas (PBKDF2-SHA256 con sal y una «pimienta»
+  que no está en la hoja, sino en las propiedades del proyecto: quien copie la hoja no
+  puede probar contraseñas). Las vueltas del cifrado se ajustan solas a lo que aguanta
+  Google y las contraseñas se vuelven a cifrar al entrar.
+- **Contraseñas**: 10 caracteres o más, con letras y números, sin el usuario ni el nombre,
+  y nada fácil de adivinar («Gestion2026», «CDMX», meses, «qwerty»…). A quien tenga una
+  que ya no cumple, se le pide cambiarla al entrar.
+- **Intentos fallidos**: cinco seguidos bloquean la cuenta 15 minutos; si se repite, 1 hora
+  y luego 4 horas. Además, si todo el sistema junta 30 fallas en un minuto, se frena la
+  entrada un momento (los intentos buenos no cuentan). Desde un **equipo de confianza**
+  el dueño de la cuenta sí puede entrar aunque esté bloqueada.
 - **La sesión se cierra sola** a las 3 horas sin uso, y también al cambiar la
   contraseña o los permisos. Si desactivas a alguien, pierde el acceso al instante.
 - **Cada petición se revisa en el servidor**: rol, libreta y sesión. Lo que se ve en
@@ -244,7 +369,16 @@ tipografías de Google Fonts.
 - **Dos personas editando lo mismo**: si alguien guardó antes, el segundo recibe un
   aviso en vez de borrarle los cambios al primero.
 - **Nada se borra**: se cancela con motivo. Los escaneos que se quitan quedan 30 días
-  en la papelera de Drive. Cada lunes se hace una **copia de la base** (se guardan las 8 últimas).
+  en la papelera de Drive, y si ya había pasado un respaldo diario, su copia sigue en
+  el espejo.
+- **Respaldos automáticos**: cada día a las 6 am, una **copia de la hoja** en «Respaldos»
+  (las 14 más recientes y una por semana de las 12 semanas anteriores) y la copia de los
+  **escaneos nuevos** en «Respaldos/Archivos (espejo)». Si el dueño pone una carpeta de
+  **otra cuenta** en `respaldo_externo` (INSTALAR.md), todo se copia también ahí: así un
+  problema con la cuenta dueña no se lleva los respaldos. `revisarRespaldos()` abre la
+  copia más reciente y revisa que esté completa (la «prueba de restauración»).
+- **Consultas inusuales**: si alguien abre, busca o descarga muchísimo en un día, queda
+  una alerta en la Bitácora y se avisa por correo a los administradores.
 - **Bitácora**: quién entró, quién capturó, editó (con el antes y el después),
   descargó, exportó o cambió permisos. Desde la app no se puede borrar.
 
@@ -252,6 +386,8 @@ tipografías de Google Fonts.
 
 - **La cuenta dueña es la llave maestra.** Quien entre a esa cuenta ve todo. Usa una
   cuenta del área con verificación en dos pasos, y que la conozcan pocas personas.
+- **Los administradores, con dos pasos.** Actívenla en «Mi cuenta» y luego háganla
+  obligatoria en Configuración.
 - **No compartas la hoja ni las carpetas** "para que alguien la vea": dale un usuario de Consulta.
 - Quien pueda **editar el proyecto de Apps Script** puede leer todo. No agregues editores.
 - La URL de la app es pública (es la pantalla de entrada). Lo que protege es la
@@ -320,21 +456,35 @@ Con un retraso simulado de 1.5 s por llamada (`CG_RETRASO_MS=1500 npm run local`
 
 ```
 apps-script/      El código de la app (lo que va al editor de Apps Script)
-  Servidor.gs       api(): sesión, permisos, registros, archivos, directorio, usuarios
-  Instalacion.gs    instalar(), restablecerAdministrador(), revisarSeguridad(), respaldoSemanal()
+  Servidor.gs       api(): permisos, registros, archivos, directorio, usuarios, caché, candado
+  Seguridad.gs      entrar, contraseñas, bloqueos, equipo de confianza, dos pasos, consultas inusuales
+  Avisos.gs         correos de turno y resumen diario (avisosDiarios)
+  Respaldos.gs      respaldoDiario(), espejo de escaneos, carpeta externa, revisarRespaldos()
+  Plantillas.gs     borrador del oficio en Word a partir de Google Docs
+  Instalacion.gs    instalar(), restablecerAdministrador(), revisarSeguridad()
   Index.html        cuerpo de la página (Google quita los comentarios HTML: no usarlos como marcadores)
   Estilos.html      identidad CDMX (morado, guinda, dorado; Cabin y Roboto)
-  App.html          la aplicación (sin librerías externas)
+  App.html          núcleo de la página: utilidades, llamar(), ventanas, avisos
+  App*.html         el resto, por pantallas: AppEntrada, AppQR, AppPortal, AppLibreta,
+                    AppDetalle, AppFormulario, AppInformes, AppAdmin, AppArranque
   Excel.html        genera el .xlsx en el navegador (sin librerías externas)
   appsscript.json   zona horaria y configuración de la app web
 base/             La base inicial (Excel) y el resumen de la migración  (NO va a GitHub)
 herramientas/     migrar_minutario.py · armar-web.mjs (arma dist/ para Vercel)
                   publicar.mjs (npm run publicar: pruebas, clasp, implementación y git)
+                  empaquetar.mjs (npm run empaquetar: .zip sin datos para compartir)
 vercel.json       Cómo publica Vercel y los encabezados de seguridad
+.github/          Las pruebas corren solas en GitHub en cada push
 .clasp.json.ejemplo  Para subir el servidor con clasp (ver INSTALAR.md, Parte C)
-pruebas/          Simulador de Apps Script en Node + pruebas
+pruebas/          Simulador de Apps Script en Node + pruebas + recorrido en navegador
 capturas/         Pantallas de la prueba en navegador  (NO va a GitHub)
 ```
+
+**Las partes de la página (`App*.html`)** se juntan en un solo programa: `doGet` las
+pega en el orden de `FRAGMENTOS_APP` (Servidor.gs) dentro de una sola función, y
+`armar-web.mjs` hace lo mismo para Vercel con la misma lista. Comparten variables
+como si fueran un solo archivo. Para agregar una parte nueva, créala y ponla en
+`FRAGMENTOS_APP`.
 
 La página de Vercel se arma con los **mismos** archivos de `apps-script/`, así que
 hay una sola copia de la app. Para hablar con el servidor, `llamar()` usa
@@ -360,11 +510,24 @@ corre en Vercel (`doPost` en Servidor.gs). Las dos rutas pasan por la misma `api
    que el servidor, lo nuevo no aparece en vez de tronar.
 6. Al editar, un campo nuevo que una página vieja no manda (`undefined`) se conserva:
    nunca se borra un dato porque la página no lo conocía.
+7. Toda escritura a la hoja va **dentro del candado** (`enCandado_`), incluida la
+   Bitácora; lo lento (crear o mandar a la papelera un archivo de Drive, mandar
+   correos) va **fuera**. Al soltar el candado se avisa a la caché que hubo cambios.
+8. Apps Script carga los `.gs` en el orden del proyecto, que no conviene dar por
+   hecho: el código suelto (fuera de una función) no puede usar funciones de otro
+   archivo (las pruebas cargan los archivos en los dos órdenes). En `ACCIONES_`, las de otros
+   archivos van envueltas: `fn: function (yo, d) { return cambiarClave_(yo, d); }`.
+9. Las funciones que corre un disparador (`respaldoDiario`, `avisosDiarios`) son
+   públicas: revisan que las llame su disparador o el dueño, y que no se repitan el
+   mismo día.
 
-**Pruebas** (necesitas Node 20 o más; Python 3 con openpyxl para la del Excel):
+**Pruebas** (necesitas Node 20 o más; Python 3 con openpyxl para la del Excel y con
+opencv-python-headless para la del código QR; sin ellos esas pruebas se saltan):
 
 ```bash
-npm test               # 69 pruebas: seguridad, permisos, consecutivos, varios destinatarios, turnos, buscador, mantenimiento, respaldo, informes, exportación, velocidad, publicar, Excel…
+npm test               # 108 pruebas: seguridad, dos pasos, contraseñas, candado y caché, permisos, consecutivos, lote, avisos, respaldos, plantilla, informes, QR, publicar, empaquetar, Excel…
+npm run e2e            # recorrido en Chromium de lo nuevo (Vercel con su CSP y Apps Script); capturas en capturas/1.7.0/
+npm run empaquetar     # .zip del código sin base/, capturas/ ni credenciales, junto a la carpeta del proyecto
 npm run local          # la app en http://localhost:4321 con la base migrada
                        #   CG_RETRASO_MS=1500 → cada llamada tarda como en Google
                        #   CG_SIMULAR_150=1   → servidor sin lo nuevo (la página debe seguir funcionando)
@@ -374,6 +537,6 @@ npm run publicar -- "mensaje"   # publica servidor y página (INSTALAR.md, Parte
 
 El simulador (`pruebas/simulador.cjs`) imita Sheets, Drive, caché, candado y
 criptografía de Apps Script, y se porta "pesimista" donde importa: convierte en
-fórmula lo que empieza con `=`, cambia "001" por 1 si la celda no es de texto, y
-truena si se escribe fuera de la hoja. Así salieron dos errores reales antes de
+fórmula lo que empieza con `=`, cambia "001" por 1 si la celda no es de texto,
+truena si se escribe fuera de la hoja y si algo se guarda en la caché por más de 6 h. Así salieron dos errores reales antes de
 llegar a Google: una hoja nueva solo trae 26 columnas, y la base necesita 33.

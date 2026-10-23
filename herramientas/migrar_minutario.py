@@ -63,7 +63,9 @@ COLS = {
     "Usuarios": ["usuario", "nombre", "rol", "tipos", "activo", "clave", "debe_cambiar",
                  "intentos", "bloqueado_hasta", "sello", "creado_en", "ultimo_acceso",
                  # 1.5.0
-                 "informes"],
+                 "informes",
+                 # 1.7.0
+                 "correo", "totp"],
     "Bitacora": ["fecha", "usuario", "accion", "registro_id", "detalle"],
     "Config": ["clave", "valor", "descripcion"],
 }

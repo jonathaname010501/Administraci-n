@@ -1,15 +1,17 @@
 {
   "name": "control-gestion",
-  "version": "1.6.0",
+  "version": "1.7.0",
   "private": true,
   "description": "Control de Gestión: servidor en Google Apps Script + página en Vercel",
   "scripts": {
-    "test": "node --test pruebas/servidor.test.cjs pruebas/mejoras.test.cjs pruebas/velocidad.test.cjs pruebas/publicar.test.cjs pruebas/excel.test.cjs",
+    "test": "node --test pruebas/servidor.test.cjs pruebas/mejoras.test.cjs pruebas/velocidad.test.cjs pruebas/publicar.test.cjs pruebas/excel.test.cjs pruebas/v170.test.cjs pruebas/qr.test.cjs pruebas/empaquetar.test.cjs",
     "web": "node herramientas/armar-web.mjs",
     "local": "node pruebas/servidor-local.cjs 4321",
+    "e2e": "node pruebas/navegador.e2e.mjs",
     "servidor:subir": "clasp push --force",
     "servidor:implementaciones": "clasp list-deployments",
-    "publicar": "node herramientas/publicar.mjs"
+    "publicar": "node herramientas/publicar.mjs",
+    "empaquetar": "node herramientas/empaquetar.mjs"
   },
   "engines": {
     "node": ">=20"

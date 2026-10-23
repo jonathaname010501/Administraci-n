@@ -207,7 +207,7 @@ test("si se publica el código sin correr instalar(), la app agrega sola la colu
   const e2 = preparar();
   const h2 = e2.hoja("Registros");
   h2.datos.forEach((f) => { if (f) f.length = Math.min(f.length, 33); });
-  h2.datos[5][34] = "nota a mano";
+  (h2.datos[5] || (h2.datos[1] = h2.datos[1] || []))[34] = "nota a mano";   // sin base/ (GitHub) la hoja solo trae encabezados
   const r2 = e2.api(e2.admin, "listar", { tipo: "OFS", anio: ANIO });
   assert.equal(r2.codigo, "INSTALACION");
   assert.equal(h2.datos[0][33], undefined, "no escribió encabezados");
@@ -404,10 +404,10 @@ test("mantenimiento: solo entran los admin; los demás reciben el mensaje; queda
   }
   assert.equal(e.api(cap, "salir").ok, true, "salir sí se puede");
   // entrar: el no-admin no recibe sesión; el admin sí
-  const r = e.api(null, "entrar", { usuario: "beto", clave: "Minutario2026x" });
+  const r = e.api(null, "entrar", { usuario: "beto", clave: "Ahuehuete2026x" });
   assert.equal(r.codigo, "MANTENIMIENTO");
   assert.equal(e.api(null, "entrar", { usuario: "beto", clave: "mala" }).codigo, "CREDENCIALES", "con contraseña mala, el mensaje de siempre");
-  assert.equal(e.api(null, "entrar", { usuario: "admin", clave: "Gestion2026" }).ok, true);
+  assert.equal(e.api(null, "entrar", { usuario: "admin", clave: "Jacaranda2026x" }).ok, true);
   assert.equal(e.api(e.admin, "listar", { tipo: "OFS", anio: ANIO }).ok, true, "el admin sigue trabajando");
   const est = e.api(null, "estado").datos;
   assert.deepEqual(est.mantenimiento, { activo: true, mensaje: "=Actualizando el sistema; regresa a las 3 pm" }, "la pantalla de entrada lo muestra");
@@ -480,7 +480,7 @@ test("duplicar: el alta anota de qué registro salió la copia", () => {
 function irA(e, iso, hora = 12) {
   e.reloj.offset = 0;
   e.reloj.offset = Date.parse(iso + "T" + String(hora + 6).padStart(2, "0") + ":00:00Z") - Date.now();
-  e.admin = entrar(e, "admin", "Gestion2026");
+  e.admin = entrar(e, "admin", "Jacaranda2026x");
 }
 
 test("fecha de atención: se pone al pasar a Atendido o Concluido y se borra si se reabre", () => {
@@ -560,7 +560,7 @@ test("Informes: por mes, remitentes y destinatarios, tiempo de respuesta y atend
     if (f && f[0] === e6.id) { f[col("fecha_atencion")] = ""; f[col("origen")] = "Minutario 2026 · prueba"; }   // sin dato
   }
   e.reloj.offset = 0;
-  e.admin = entrar(e, "admin", "Gestion2026");
+  e.admin = entrar(e, "admin", "Jacaranda2026x");
   const r = e.api(e.admin, "informes", { desde: "2026-01-01", hasta: "2026-12-31" }).datos;
   const mes = (m) => r.porMes.find((x) => x.mes === m);
   assert.equal(r.porMes.length, 12);

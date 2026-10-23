@@ -13,3 +13,6 @@ informativas y volantes de turno) que sustituye al Excel "Minutario".
 | [CAMBIOS.md](CAMBIOS.md) | Qué trae cada versión y qué hacer al publicarla |
 
 > Los datos reales (`base/`, capturas, Excel) **no** están en este repositorio a propósito.
+> Para compartir el código sin ellos: `npm run empaquetar` arma un .zip limpio.
+
+Las pruebas (`npm test`) corren en GitHub Actions en cada push.

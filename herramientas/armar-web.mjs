@@ -40,10 +40,17 @@ const leer = (n) => readFileSync(join(SRC, n), "utf8");
 const sinEtiqueta = (s, tag) => s.replace(new RegExp(`^\\s*<${tag}>`), "").replace(new RegExp(`</${tag}>\\s*$`), "").trim() + "\n";
 const huella = (s) => createHash("sha256").update(s).digest("hex").slice(0, 10);
 
+// La app está en varias partes (App*.html); se juntan en UNA función, en el mismo
+// orden que usa doGet() en Servidor.gs (la lista se lee de ahí: una sola fuente).
+const listaFragmentos = (leer("Servidor.gs").match(/var FRAGMENTOS_APP = (\[[^\]]+\]);/) || [])[1];
+if (!listaFragmentos) throw new Error("No encontré FRAGMENTOS_APP en Servidor.gs");
+const FRAGMENTOS = JSON.parse(listaFragmentos.replace(/'/g, '"'));
+const app = "(function () {\n'use strict';\n" + FRAGMENTOS.map((n) => sinEtiqueta(leer(n + ".html"), "script")).join("\n") + "})();\n";
+
 const archivos = {
   "estilos.css": sinEtiqueta(leer("Estilos.html"), "style"),
   "excel.js": sinEtiqueta(leer("Excel.html"), "script"),
-  "app.js": sinEtiqueta(leer("App.html"), "script"),
+  "app.js": app,
   "config.js": `// Generado por armar-web.mjs: dirección del servidor (Apps Script)\nwindow.CG_API = ${JSON.stringify(api)};\n`,
   // Para instalar la app en el celular o la computadora, con su nombre e ícono
   "manifest.webmanifest": JSON.stringify({
